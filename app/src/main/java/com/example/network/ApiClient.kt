@@ -16,10 +16,10 @@ import java.util.concurrent.TimeUnit
  * below, each of which enforces its own authorization.
  */
 object ArtifyBackendConfig {
-    const val SUPABASE_URL = "https://dzwentiqcuqntvmxrqjw.supabase.co"
+    const val SUPABASE_URL = "https://jpsiafvbyupofnbqonkq.supabase.co"
     const val SUPABASE_ANON_KEY =
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR6d2VudGlxY3VxbnR2bXhycWp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyMTE4MzIsImV4cCI6MjEwMzc4NzgzMn0.YxD_4qHRsVnWGLKzBXb16Lk1IyapFUdRzw3cpGJVby0"
-    const val COMPANY_CODE = "ARTIFY-01"
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impwc2lhZnZieXVwb2ZuYnFvbmtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxODIxMzAsImV4cCI6MjEwMzc1ODEzMH0.7ppmA3GRy-ABdva_A2GfrEmCgmtV5CneKBrQYwABbHM"
+    const val COMPANY_CODE = "DGO"
     private const val FUNCTIONS_BASE_URL = "$SUPABASE_URL/functions/v1/"
 
     val api: SupabaseApi by lazy { buildRetrofit().create(SupabaseApi::class.java) }
