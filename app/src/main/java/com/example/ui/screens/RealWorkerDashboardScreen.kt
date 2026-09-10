@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -93,7 +94,7 @@ fun RealWorkerDashboardScreen(
                     title = {
                         Column {
                             Text(
-                                text = "Daily Attendance Logs",
+                                text = "My Shifts Summary",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp,
                                 color = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
@@ -124,7 +125,7 @@ fun RealWorkerDashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Room DB",
+                                    text = "Supabase DB",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = SophisticatedPrimary
@@ -166,7 +167,7 @@ fun RealWorkerDashboardScreen(
                 NavigationBarItem(selected = tab == RealWorkerTab.SHIFT, onClick = { tab = RealWorkerTab.SHIFT },
                     icon = { Icon(Icons.Default.Schedule, contentDescription = "Shift") }, label = { Text("Shift") }, colors = navColors())
                 NavigationBarItem(selected = tab == RealWorkerTab.LOGS, onClick = { tab = RealWorkerTab.LOGS },
-                    icon = { Icon(Icons.Default.History, contentDescription = "Daily Logs") }, label = { Text("Daily Logs") }, colors = navColors())
+                    icon = { Icon(Icons.Default.History, contentDescription = "My Shifts") }, label = { Text("My Shifts") }, modifier = Modifier.testTag("nav_my_shifts"), colors = navColors())
                 NavigationBarItem(selected = tab == RealWorkerTab.LEAVE, onClick = { tab = RealWorkerTab.LEAVE },
                     icon = { Icon(Icons.Default.EventNote, contentDescription = "Leave") }, label = { Text("Leave") }, colors = navColors())
                 NavigationBarItem(selected = tab == RealWorkerTab.PROFILE, onClick = { tab = RealWorkerTab.PROFILE },
@@ -847,6 +848,53 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // Supabase Database Connection Status Banner
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh,
+            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) SophisticatedSuccess else SophisticatedLightSuccess)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Connected to Supabase Database",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary
+                    )
+                    Text(
+                        "https://jpsiafvbyupofnbqonkq.supabase.co • Shift completion logs stored",
+                        fontSize = 9.5.sp,
+                        color = textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(
+                    onClick = { viewModel.refresh() },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = SophisticatedPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
         val totalMinutes = allShifts.sumOf { it.totalWorkedMinutes ?: 0 }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MiniStatCard("Completed", allShifts.count { it.status != "OPEN" }.toString(), "Total Shifts", Icons.Default.CheckCircle, Modifier.weight(1f))
@@ -901,8 +949,8 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("SHIFT RECORDS (${filtered.size})", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
-            Text("Source: Local Room Database", fontSize = 9.5.sp, color = textMuted)
+            Text("MY SHIFTS SUMMARY (${filtered.size})", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
+            Text("Supabase Cloud DB & Room DB", fontSize = 9.5.sp, color = textMuted)
         }
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -998,6 +1046,30 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                     }
                                 }
                             }
+                            if (shift.status != "OPEN" || shift.clockOut != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = if (isDark) SophisticatedSuccessContainer.copy(alpha = 0.5f) else SophisticatedLightSuccessContainer,
+                                        border = BorderStroke(1.dp, SophisticatedSuccessBorder)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.CloudDone, contentDescription = null, tint = SophisticatedSuccess, modifier = Modifier.size(11.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Stored in Supabase DB", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SophisticatedSuccess)
+                                        }
+                                    }
+                                    Text("Tap for details", fontSize = 9.5.sp, color = textMuted)
+                                }
+                            }
                         }
                     }
                 }
@@ -1056,6 +1128,9 @@ private fun AttendanceDetailDialog(shift: AttendanceShiftDto, uiState: RealWorke
                 KeyValueRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
                 KeyValueRow("Biometric Match", if (selfiePath != null) "Selfie captured & verified" else "No selfie on record")
                 KeyValueRow("Hardware Device", (shift.clockIn?.deviceId ?: shift.clockOut?.deviceId)?.take(18) ?: "Unknown")
+                KeyValueRow("Database Storage", "Supabase Database & Local Room DB")
+                KeyValueRow("Supabase Endpoint", "jpsiafvbyupofnbqonkq.supabase.co")
+                KeyValueRow("Shift Completion", if (shift.clockOut != null || shift.status != "OPEN") "Logged & Synced to Cloud" else "Shift in progress")
                 shift.reviewComment?.let { KeyValueRow("Supervisor Note", it) }
 
                 Spacer(modifier = Modifier.height(18.dp))

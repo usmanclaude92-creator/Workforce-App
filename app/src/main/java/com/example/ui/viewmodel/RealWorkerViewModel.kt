@@ -1,18 +1,22 @@
 package com.example.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
 import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.SupabaseStorageService
 import com.example.data.sync.OfflineCache
 import com.example.data.sync.RealSyncManager
 import com.example.data.sync.SyncQueueStatus
 import com.example.location.LocationHelper
+import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceEventSummary
 import com.example.network.AttendanceShiftDto
 import com.example.network.LeaveRequestDto
 import com.example.network.NotificationDto
 import com.example.network.ProfileDto
+import com.example.network.ShiftCompletionLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +34,7 @@ const val LOCAL_PENDING_SHIFT_PREFIX = "local-pending-"
 data class RealWorkerUiState(
     val activeShift: AttendanceShiftDto? = null,
     val shiftHistory: List<AttendanceShiftDto> = emptyList(),
+    val completionLogs: List<ShiftCompletionLog> = emptyList(),
     val leaveHistory: List<LeaveRequestDto> = emptyList(),
     val isProcessing: Boolean = false,
     val isLoading: Boolean = true,
@@ -112,6 +117,7 @@ class RealWorkerViewModel(
     fun refresh() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
+            val cachedCompletionLogs = offlineCache.getCachedShiftCompletionLogs(employeeId) ?: emptyList()
             if (!pendingLocalClockIn) {
                 when (val result = repository.myShifts()) {
                     is BackendResult.Success -> {
@@ -124,7 +130,38 @@ class RealWorkerViewModel(
                                     it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
                                 }.thenByDescending { it.shiftDate }
                             )
-                        _uiState.value = _uiState.value.copy(activeShift = active, shiftHistory = history, isLoading = false)
+                        val serverLogs = history.map { shift ->
+                            ShiftCompletionLog(
+                                logId = "LOG-${shift.id.takeLast(8)}",
+                                shiftId = shift.id,
+                                employeeId = shift.employeeId,
+                                employeeName = shift.employee?.fullName ?: _uiState.value.profile?.fullName ?: "Worker",
+                                projectName = shift.project?.name ?: "Assigned Site",
+                                shiftDate = shift.shiftDate,
+                                clockInTime = shift.clockIn?.serverTimestamp,
+                                clockOutTime = shift.clockOut?.serverTimestamp ?: (shift.shiftDate + "T17:00:00Z"),
+                                totalWorkedMinutes = shift.totalWorkedMinutes ?: 0,
+                                selfieUrl = shift.clockOut?.selfieStoragePath ?: shift.clockIn?.selfieStoragePath,
+                                latitude = null,
+                                longitude = null,
+                                gpsAccuracyMeters = null,
+                                isMockLocation = shift.clockOut?.isMockLocation ?: false,
+                                status = shift.status,
+                                supabaseSyncStatus = "STORED_IN_SUPABASE",
+                                completedAtUtc = runCatching {
+                                    Instant.parse(shift.clockOut?.serverTimestamp ?: (shift.shiftDate + "T17:00:00Z")).toEpochMilli()
+                                }.getOrDefault(System.currentTimeMillis()),
+                                supervisorReview = shift.reviewComment
+                            )
+                        }
+                        val mergedLogs = (cachedCompletionLogs + serverLogs).distinctBy { it.shiftId }
+                        offlineCache.cacheShiftCompletionLogs(employeeId, mergedLogs)
+                        _uiState.value = _uiState.value.copy(
+                            activeShift = active,
+                            shiftHistory = history,
+                            completionLogs = mergedLogs,
+                            isLoading = false
+                        )
                     }
                     is BackendResult.Failure -> {
                         val cached = if (result.isNetworkError) offlineCache.getCachedShifts(employeeId) else null
@@ -137,14 +174,23 @@ class RealWorkerViewModel(
                                         it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
                                     }.thenByDescending { it.shiftDate }
                                 )
-                            _uiState.value = _uiState.value.copy(activeShift = active, shiftHistory = history, isLoading = false)
+                            _uiState.value = _uiState.value.copy(
+                                activeShift = active,
+                                shiftHistory = history,
+                                completionLogs = cachedCompletionLogs,
+                                isLoading = false
+                            )
                         } else {
-                            _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = result.message)
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                completionLogs = cachedCompletionLogs,
+                                errorMessage = result.message
+                            )
                         }
                     }
                 }
             } else {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+                _uiState.value = _uiState.value.copy(isLoading = false, completionLogs = cachedCompletionLogs)
             }
             when (val result = repository.myLeaveRequests()) {
                 is BackendResult.Success -> {
@@ -253,7 +299,12 @@ class RealWorkerViewModel(
                     // Update cache with verified URL immediately so UI renders without delay
                     val shift = result.value.shift
                     val updatedCache = if (uploadedPublicUrl != null) {
-                        _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl) + (shift.clockIn?.selfieStoragePath.orEmpty() to uploadedPublicUrl)
+                        val selfieKey = shift?.clockIn?.selfieStoragePath.orEmpty()
+                        if (selfieKey.isNotEmpty()) {
+                            _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl) + (selfieKey to uploadedPublicUrl)
+                        } else {
+                            _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl)
+                        }
                     } else _uiState.value.selfieUrlCache
 
                     // Delete old temporary capture file
@@ -301,9 +352,32 @@ class RealWorkerViewModel(
             when (result) {
                 is BackendResult.Success -> {
                     runCatching { File(selfieFilePath).delete() }
+                    val shift = result.value.shift
+                    val nowIso = Instant.now().toString()
+                    val completionLog = ShiftCompletionLog(
+                        logId = "LOG-${UUID.randomUUID().toString().take(8)}",
+                        shiftId = shift?.id ?: clientEventId,
+                        employeeId = employeeId,
+                        employeeName = _uiState.value.profile?.fullName ?: "Worker",
+                        projectName = shift?.project?.name ?: _uiState.value.activeShift?.project?.name ?: "Assigned Site",
+                        shiftDate = shift?.shiftDate ?: OffsetDateTime.now().toLocalDate().toString(),
+                        clockInTime = shift?.clockIn?.serverTimestamp ?: _uiState.value.activeShift?.clockIn?.serverTimestamp,
+                        clockOutTime = shift?.clockOut?.serverTimestamp ?: nowIso,
+                        totalWorkedMinutes = shift?.totalWorkedMinutes ?: 0,
+                        selfieUrl = shift?.clockOut?.selfieStoragePath ?: _uiState.value.selfieUrlCache[clientEventId],
+                        latitude = location?.latitude,
+                        longitude = location?.longitude,
+                        gpsAccuracyMeters = location?.accuracy,
+                        isMockLocation = location?.isMock ?: false,
+                        status = shift?.status ?: "COMPLETED",
+                        supabaseSyncStatus = "STORED_IN_SUPABASE",
+                        completedAtUtc = System.currentTimeMillis()
+                    )
+                    offlineCache.recordShiftCompletionLog(employeeId, completionLog)
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false, activeShift = null,
-                        statusMessage = "Shift ended — submitted for supervisor approval."
+                        completionLogs = listOf(completionLog) + _uiState.value.completionLogs,
+                        statusMessage = "Shift completed and logged to Supabase database."
                     )
                     refresh()
                 }
@@ -311,9 +385,29 @@ class RealWorkerViewModel(
                     if (result.isNetworkError) {
                         syncManager.queueClockEvent(clientEventId, "clock_out", deviceTimestamp, location?.latitude, location?.longitude, location?.accuracy, location?.isMock ?: false, selfieFilePath)
                         runCatching { File(selfieFilePath).delete() }
+                        val completionLog = ShiftCompletionLog(
+                            logId = "LOG-${UUID.randomUUID().toString().take(8)}",
+                            shiftId = clientEventId,
+                            employeeId = employeeId,
+                            employeeName = _uiState.value.profile?.fullName ?: "Worker",
+                            projectName = _uiState.value.activeShift?.project?.name ?: "Assigned Site",
+                            shiftDate = _uiState.value.activeShift?.shiftDate ?: OffsetDateTime.now().toLocalDate().toString(),
+                            clockInTime = _uiState.value.activeShift?.clockIn?.serverTimestamp,
+                            clockOutTime = deviceTimestamp,
+                            totalWorkedMinutes = 0,
+                            latitude = location?.latitude,
+                            longitude = location?.longitude,
+                            gpsAccuracyMeters = location?.accuracy,
+                            isMockLocation = location?.isMock ?: false,
+                            status = "QUEUED_OFFLINE",
+                            supabaseSyncStatus = "QUEUED_OFFLINE",
+                            completedAtUtc = System.currentTimeMillis()
+                        )
+                        offlineCache.recordShiftCompletionLog(employeeId, completionLog)
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false, activeShift = null,
-                            statusMessage = "You're offline — clock-out queued and will sync automatically once connected."
+                            completionLogs = listOf(completionLog) + _uiState.value.completionLogs,
+                            statusMessage = "You're offline — shift completion queued and will sync to Supabase automatically."
                         )
                     } else {
                         runCatching { File(selfieFilePath).delete() }

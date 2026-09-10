@@ -105,9 +105,9 @@ fun WorkerDashboardScreen(
                     NavigationBarItem(
                         selected = selectedBottomNav == 1,
                         onClick = { selectedBottomNav = 1; isRequestingLeave = false },
-                        icon = { Icon(Icons.Default.History, contentDescription = "Daily Logs") },
-                        label = { Text("Daily Logs") },
-                        modifier = Modifier.testTag("nav_history"),
+                        icon = { Icon(Icons.Default.History, contentDescription = "My Shifts") },
+                        label = { Text("My Shifts") },
+                        modifier = Modifier.testTag("nav_my_shifts"),
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             indicatorColor = MaterialTheme.colorScheme.primaryContainer,

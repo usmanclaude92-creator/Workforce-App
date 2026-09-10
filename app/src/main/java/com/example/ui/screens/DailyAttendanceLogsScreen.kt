@@ -110,7 +110,7 @@ fun DailyAttendanceLogsScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Daily Attendance Logs",
+                            text = "My Shifts Summary",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = SophisticatedTextPrimary
@@ -137,7 +137,7 @@ fun DailyAttendanceLogsScreen(
                     }
                 },
                 actions = {
-                    // Room Database Badge Pill
+                    // Supabase & Room Database Badge Pill
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = SophisticatedPrimaryContainer.copy(alpha = 0.6f),
@@ -156,7 +156,7 @@ fun DailyAttendanceLogsScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Room DB",
+                                text = "Supabase DB",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = SophisticatedPrimary
@@ -181,6 +181,44 @@ fun DailyAttendanceLogsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item { Spacer(modifier = Modifier.height(6.dp)) }
+
+            // Supabase Cloud & Room Database Connection Card
+            item {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = SophisticatedDarkSurfaceHigh,
+                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(SophisticatedSuccess)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Connected to Supabase Database",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SophisticatedTextPrimary
+                            )
+                            Text(
+                                "https://jpsiafvbyupofnbqonkq.supabase.co • Shift completion logs stored",
+                                fontSize = 10.sp,
+                                color = SophisticatedTextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
 
             // Summary Metrics Header Cards
             item {

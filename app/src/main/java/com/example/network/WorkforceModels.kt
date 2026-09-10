@@ -267,3 +267,26 @@ data class SupervisorMetricsDto(
     @Json(name = "on_leave") val onLeave: Int = 0,
     val error: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class ShiftCompletionLog(
+    @Json(name = "log_id") val logId: String,
+    @Json(name = "shift_id") val shiftId: String,
+    @Json(name = "employee_id") val employeeId: String,
+    @Json(name = "employee_name") val employeeName: String,
+    @Json(name = "project_name") val projectName: String,
+    @Json(name = "shift_date") val shiftDate: String,
+    @Json(name = "clock_in_time") val clockInTime: String?,
+    @Json(name = "clock_out_time") val clockOutTime: String,
+    @Json(name = "total_worked_minutes") val totalWorkedMinutes: Int,
+    @Json(name = "selfie_url") val selfieUrl: String? = null,
+    @Json(name = "latitude") val latitude: Double? = null,
+    @Json(name = "longitude") val longitude: Double? = null,
+    @Json(name = "gps_accuracy_meters") val gpsAccuracyMeters: Float? = null,
+    @Json(name = "is_mock_location") val isMockLocation: Boolean = false,
+    @Json(name = "status") val status: String = "COMPLETED",
+    @Json(name = "supabase_sync_status") val supabaseSyncStatus: String = "STORED_IN_SUPABASE",
+    @Json(name = "completed_at_utc") val completedAtUtc: Long = System.currentTimeMillis(),
+    @Json(name = "supervisor_review") val supervisorReview: String? = null
+)
+

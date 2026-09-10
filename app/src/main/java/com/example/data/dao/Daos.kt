@@ -96,6 +96,12 @@ interface AttendanceDao {
     @Query("UPDATE attendance SET firestoreSyncStatus = :status WHERE attendanceId = :id")
     suspend fun updateFirestoreSyncStatus(id: String, status: String)
 
+    @Query("SELECT * FROM attendance WHERE employeeId = :employeeId ORDER BY createdAtUtc DESC LIMIT 1")
+    suspend fun getLatestAttendanceForWorker(employeeId: String): AttendanceEntity?
+
+    @Query("SELECT * FROM attendance WHERE employeeId = :employeeId ORDER BY createdAtUtc DESC LIMIT :limit")
+    fun getRecentShiftsForEmployee(employeeId: String, limit: Int = 20): Flow<List<AttendanceEntity>>
+
     @Query("SELECT COUNT(*) FROM attendance")
     suspend fun getAttendanceCount(): Int
 }

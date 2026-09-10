@@ -11,7 +11,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Engineering
@@ -356,7 +355,7 @@ private fun PinLoginContent(
                             modifier = Modifier.size(64.dp).clip(CircleShape)
                                 .clickable(enabled = pin.isNotEmpty() && !isLoading) { pin = pin.dropLast(1) },
                             contentAlignment = Alignment.Center
-                        ) { Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        ) { Text("⌫", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         else -> Box(
                             modifier = Modifier.size(64.dp).clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
