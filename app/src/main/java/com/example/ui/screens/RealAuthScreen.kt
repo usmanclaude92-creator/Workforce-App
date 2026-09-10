@@ -290,6 +290,13 @@ private fun PinLoginContent(
 ) {
     var pin by remember { mutableStateOf("") }
 
+    // Requirement 2: When an incorrect PIN error occurs, automatically clear all entered digits/state
+    LaunchedEffect(errorMessage) {
+        if (!errorMessage.isNullOrBlank()) {
+            pin = ""
+        }
+    }
+
     LaunchedEffect(pin) {
         if (pin.length == 4 && !isLoading) onSubmitPin(pin)
     }
@@ -349,7 +356,7 @@ private fun PinLoginContent(
                             modifier = Modifier.size(64.dp).clip(CircleShape)
                                 .clickable(enabled = pin.isNotEmpty() && !isLoading) { pin = pin.dropLast(1) },
                             contentAlignment = Alignment.Center
-                        ) { Icon(Icons.Default.Backspace, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        ) { Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                         else -> Box(
                             modifier = Modifier.size(64.dp).clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))

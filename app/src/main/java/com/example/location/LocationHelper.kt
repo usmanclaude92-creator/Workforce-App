@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
 import android.os.Build
+import android.os.SystemClock
 import com.example.data.entity.ProjectEntity
 import com.example.model.GeofenceStatus
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -17,7 +18,9 @@ data class DeviceLocationSnapshot(
     val longitude: Double,
     val accuracy: Float,
     val isMock: Boolean,
-    val isRealGps: Boolean
+    val isRealGps: Boolean,
+    val elapsedRealtimeNanos: Long = SystemClock.elapsedRealtimeNanos(),
+    val isStale: Boolean = false
 )
 
 data class GeofenceValidationResult(
@@ -52,12 +55,17 @@ class LocationHelper(private val context: Context) {
                     @Suppress("DEPRECATION")
                     location.isFromMockProvider
                 }
+                val ageMillis = (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+                val isStale = ageMillis > 60_000L // Stale if captured more than 60 seconds ago
+
                 DeviceLocationSnapshot(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     accuracy = location.accuracy,
                     isMock = isMock,
-                    isRealGps = true
+                    isRealGps = !isMock,
+                    elapsedRealtimeNanos = location.elapsedRealtimeNanos,
+                    isStale = isStale
                 )
             } else {
                 // Try last known location
@@ -69,12 +77,17 @@ class LocationHelper(private val context: Context) {
                         @Suppress("DEPRECATION")
                         lastLoc.isFromMockProvider
                     }
+                    val ageMillis = (SystemClock.elapsedRealtimeNanos() - lastLoc.elapsedRealtimeNanos) / 1_000_000L
+                    val isStale = ageMillis > 60_000L
+
                     DeviceLocationSnapshot(
                         latitude = lastLoc.latitude,
                         longitude = lastLoc.longitude,
                         accuracy = lastLoc.accuracy,
                         isMock = isMock,
-                        isRealGps = true
+                        isRealGps = !isMock,
+                        elapsedRealtimeNanos = lastLoc.elapsedRealtimeNanos,
+                        isStale = isStale
                     )
                 } else {
                     null
@@ -130,6 +143,20 @@ class LocationHelper(private val context: Context) {
                 isMockLocation = true,
                 status = GeofenceStatus.MOCK_LOCATION_DETECTED,
                 message = "Mock/Spoofed GPS location detected. Clock-in submission is blocked."
+            )
+        }
+
+        if (location.isStale) {
+            val dist = calculateDistanceMeters(location.latitude, location.longitude, project.latitude, project.longitude)
+            return GeofenceValidationResult(
+                isWithinRadius = false,
+                distanceMeters = dist,
+                allowedRadiusMeters = project.geofenceRadiusMeters.toFloat(),
+                isAccuracyAcceptable = false,
+                accuracyMeters = location.accuracy,
+                isMockLocation = false,
+                status = GeofenceStatus.ACCURACY_TOO_LOW,
+                message = "GPS telemetry is stale (>60s old). Awaiting fresh satellite lock."
             )
         }
 

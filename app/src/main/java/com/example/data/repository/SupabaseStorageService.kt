@@ -103,6 +103,86 @@ class SupabaseStorageService(
     }
 
     /**
+     * Verifies that the uploaded selfie is accessible in object storage (HTTP 200).
+     */
+    suspend fun verifySelfieAccessible(url: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .head()
+                .build()
+            val response = httpClient.newCall(request).execute()
+            response.use { it.isSuccessful }
+        } catch (e: Exception) {
+            Log.w(TAG, "Verification check failed for $url: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Deletes a selfie from Supabase object storage (and local cache if applicable).
+     * Used during shift-start selfie replacement to prevent orphan files and bloat.
+     */
+    suspend fun deleteSelfieFile(urlOrPath: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        if (urlOrPath.isNullOrBlank()) return@withContext Result.success(Unit)
+        try {
+            // Delete local file if it exists on disk
+            try {
+                val localFile = File(urlOrPath)
+                if (localFile.exists()) {
+                    localFile.delete()
+                    Log.d(TAG, "Deleted local selfie cache: $urlOrPath")
+                }
+            } catch (e: Exception) {
+                // Ignore local file deletion failure
+            }
+
+            // If it's a Supabase storage URL or path, remove from remote bucket
+            val fileName = extractFileNameFromUrl(urlOrPath)
+            if (!fileName.isNullOrBlank()) {
+                val token = sessionStore.cachedAccessToken()
+                val authHeader = if (!token.isNullOrBlank()) "Bearer $token" else "Bearer ${ArtifyBackendConfig.SUPABASE_ANON_KEY}"
+                val targetUrl = "${ArtifyBackendConfig.SUPABASE_URL}/storage/v1/object/$BUCKET_NAME/$fileName"
+
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .addHeader("Authorization", authHeader)
+                    .addHeader("apikey", ArtifyBackendConfig.SUPABASE_ANON_KEY)
+                    .delete()
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                response.use { resp ->
+                    if (resp.isSuccessful || resp.code == 404) {
+                        Log.i(TAG, "Successfully deleted remote selfie: $fileName")
+                    } else {
+                        Log.w(TAG, "Remote delete returned HTTP ${resp.code} for $fileName")
+                    }
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error deleting old selfie: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    private fun extractFileNameFromUrl(urlOrPath: String): String? {
+        return when {
+            urlOrPath.contains("/storage/v1/object/public/$BUCKET_NAME/") ->
+                urlOrPath.substringAfter("/storage/v1/object/public/$BUCKET_NAME/")
+            urlOrPath.contains("/storage/v1/object/$BUCKET_NAME/") ->
+                urlOrPath.substringAfter("/storage/v1/object/$BUCKET_NAME/")
+            urlOrPath.startsWith("$BUCKET_NAME/") ->
+                urlOrPath.removePrefix("$BUCKET_NAME/")
+            urlOrPath.startsWith("http://") || urlOrPath.startsWith("https://") ->
+                urlOrPath.substringAfterLast("/")
+            !urlOrPath.contains("/") -> urlOrPath
+            else -> null
+        }
+    }
+
+    /**
      * Resizes the image to max 720p with 80% JPEG compression (~40-80 KB),
      * drastically reducing upload bandwidth over field cellular networks.
      */

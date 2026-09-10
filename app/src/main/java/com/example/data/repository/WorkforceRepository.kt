@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
 
 class WorkforceRepository(
@@ -29,6 +30,10 @@ class WorkforceRepository(
 
     val firestoreSyncManager: FirestoreSyncManager? = context?.let {
         FirestoreSyncManager.getInstance(it, db)
+    }
+
+    val supabaseStorageService: SupabaseStorageService? = context?.let {
+        SupabaseStorageService(it)
     }
 
     private val userDao = db.userDao()
@@ -599,6 +604,35 @@ class WorkforceRepository(
         val serverTime = ServerAuthorityEngine.getServerTimestamp()
         val attendanceId = "ATT-" + serverTime.dateString.replace("-", "") + "-" + UUID.randomUUID().toString().take(6).uppercase()
 
+        // Requirement 3 & 4: Shift-Start Selfie Storage Flow
+        // Capture → Upload → Storage → Database → Employee/Shift link → HCMS
+        // Transaction: Upload new → verify → update DB → verify → delete old image
+        val previousShift = attendanceDao.getLatestAttendanceForWorker(employee.employeeId)
+        val oldSelfieUrl = previousShift?.startSelfieData
+
+        var storedSelfieUrl = selfieData
+        val localFile = File(selfieData)
+        val storage = supabaseStorageService
+
+        if (localFile.exists() && storage != null) {
+            // Step 1: Upload new image to Supabase Object Storage
+            val customFileName = "selfie_${employee.employeeId}_${attendanceId}_${System.currentTimeMillis()}.jpg"
+            val uploadResult = storage.uploadSelfieFile(localFile, customFileName)
+            if (uploadResult.isSuccess) {
+                val newUrl = uploadResult.getOrThrow()
+                // Step 2: Verify new image is accessible
+                val isAccessible = storage.verifySelfieAccessible(newUrl)
+                if (isAccessible) {
+                    storedSelfieUrl = newUrl
+                    Log.i("WorkforceRepository", "Shift-start selfie verified in Supabase Storage: $storedSelfieUrl")
+                } else {
+                    Log.w("WorkforceRepository", "Uploaded selfie failed accessibility verification; retaining original reference")
+                }
+            } else {
+                Log.w("WorkforceRepository", "Selfie upload failed: ${uploadResult.exceptionOrNull()?.message}; retaining fallback")
+            }
+        }
+
         val attendance = AttendanceEntity(
             attendanceId = attendanceId,
             employeeId = employee.employeeId,
@@ -612,7 +646,7 @@ class WorkforceRepository(
             endTimeUtc = null,
             endTimeFormatted = null,
             totalWorkedMinutes = 0,
-            startSelfieData = selfieData,
+            startSelfieData = storedSelfieUrl,
             endSelfieData = null,
             startLatitude = latitude,
             startLongitude = longitude,
@@ -626,7 +660,21 @@ class WorkforceRepository(
             createdAtUtc = serverTime.timestampUtc
         )
 
+        // Step 3: Update DB
         attendanceDao.insertAttendance(attendance)
+
+        // Step 4: Verify DB insertion
+        val verifiedAttendance = attendanceDao.getAttendanceById(attendanceId)
+        if (verifiedAttendance != null && (storedSelfieUrl.startsWith("http://") || storedSelfieUrl.startsWith("https://"))) {
+            // Step 5: Delete old image only now that new one is verified and safely stored in DB
+            if (!oldSelfieUrl.isNullOrBlank() && oldSelfieUrl != storedSelfieUrl) {
+                storage?.deleteSelfieFile(oldSelfieUrl)
+            }
+            // Clean up temporary local camera capture file
+            if (localFile.exists()) {
+                localFile.delete()
+            }
+        }
 
         // Queue clock-in attempt into Firestore persistent cache (queues offline, auto-syncs when online)
         firestoreSyncManager?.queueClockIn(attendance)
@@ -647,6 +695,64 @@ class WorkforceRepository(
         )
 
         return Result.success(attendance)
+    }
+
+    /**
+     * Replaces a shift-start selfie strictly adhering to the 5-step transaction:
+     * Upload new -> verify -> update DB -> verify -> delete old image.
+     * Retains only the latest selfie, preventing orphan files and broken references.
+     */
+    suspend fun replaceShiftSelfie(
+        attendanceId: String,
+        newSelfieFilePath: String
+    ): Result<AttendanceEntity> {
+        val attendance = attendanceDao.getAttendanceById(attendanceId)
+            ?: return Result.failure(IllegalArgumentException("Attendance record not found: $attendanceId"))
+
+        val oldSelfieUrl = attendance.startSelfieData
+        val localFile = File(newSelfieFilePath)
+        if (!localFile.exists()) {
+            return Result.failure(IllegalArgumentException("New selfie file does not exist: $newSelfieFilePath"))
+        }
+
+        val storage = supabaseStorageService
+            ?: return Result.failure(IllegalStateException("SupabaseStorageService not available"))
+
+        // Step 1: Upload new image
+        val customFileName = "selfie_${attendance.employeeId}_${attendance.attendanceId}_${System.currentTimeMillis()}.jpg"
+        val uploadResult = storage.uploadSelfieFile(localFile, customFileName)
+        if (uploadResult.isFailure) {
+            // Upload failure -> old valid selfie remains intact!
+            return Result.failure(uploadResult.exceptionOrNull() ?: Exception("Failed to upload new selfie"))
+        }
+        val newUrl = uploadResult.getOrThrow()
+
+        // Step 2: Verify new image uploaded & accessible
+        val isAccessible = storage.verifySelfieAccessible(newUrl)
+        if (!isAccessible) {
+            storage.deleteSelfieFile(newUrl)
+            return Result.failure(Exception("New selfie verification failed in object storage"))
+        }
+
+        // Step 3: Update DB
+        val updatedAttendance = attendance.copy(startSelfieData = newUrl)
+        attendanceDao.updateAttendance(updatedAttendance)
+
+        // Step 4: Verify DB update
+        val reloaded = attendanceDao.getAttendanceById(attendanceId)
+        if (reloaded?.startSelfieData != newUrl) {
+            return Result.failure(Exception("Database verification failed after updating selfie URL"))
+        }
+
+        // Step 5: Delete old image from storage and remove local temp file
+        if (!oldSelfieUrl.isNullOrBlank() && oldSelfieUrl != newUrl) {
+            storage.deleteSelfieFile(oldSelfieUrl)
+        }
+        if (localFile.exists()) {
+            localFile.delete()
+        }
+
+        return Result.success(reloaded)
     }
 
     suspend fun endShift(

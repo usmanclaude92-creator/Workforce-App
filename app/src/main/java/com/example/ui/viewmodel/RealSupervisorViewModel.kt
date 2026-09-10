@@ -80,6 +80,19 @@ class RealSupervisorViewModel(private val repository: BackendWorkforceRepository
 
     fun loadSelfieUrl(storagePath: String) {
         if (_uiState.value.selfieUrlCache.containsKey(storagePath)) return
+        if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
+            _uiState.value = _uiState.value.copy(
+                selfieUrlCache = _uiState.value.selfieUrlCache + (storagePath to storagePath)
+            )
+            return
+        }
+        if (storagePath.startsWith("attendance-selfies/")) {
+            val publicUrl = "${ArtifyBackendConfig.SUPABASE_URL}/storage/v1/object/public/$storagePath"
+            _uiState.value = _uiState.value.copy(
+                selfieUrlCache = _uiState.value.selfieUrlCache + (storagePath to publicUrl)
+            )
+            return
+        }
         viewModelScope.launch {
             when (val result = repository.getTeamSelfieUrl(storagePath)) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(

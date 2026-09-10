@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.repository.BackendAuthRepository
 import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.SupabaseStorageService
 import com.example.data.repository.WorkforceRepository
 import com.example.data.sync.NetworkMonitor
 import com.example.data.sync.OfflineCache
@@ -181,8 +182,9 @@ fun ArtifyAppRoot() {
                     RealSyncManager(context, backendWorkforceRepository, NetworkMonitor(context), signedInEmployee.id)
                 }
                 val offlineCache = remember { OfflineCache(context) }
+                val storageService = remember { SupabaseStorageService(context) }
                 val workerViewModel = remember(signedInEmployee.id) {
-                    RealWorkerViewModel(backendWorkforceRepository, locationHelper, syncManager, offlineCache, signedInEmployee.id)
+                    RealWorkerViewModel(backendWorkforceRepository, locationHelper, syncManager, offlineCache, signedInEmployee.id, storageService)
                 }
                 RealWorkerDashboardScreen(
                     viewModel = workerViewModel,

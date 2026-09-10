@@ -784,10 +784,15 @@ fun AttendanceLogDetailModal(
                             .border(1.dp, SophisticatedDarkBorder, RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        val selfieFile = File(selfiePath)
-                        if (selfieFile.exists()) {
+                        val selfieModel: Any? = when {
+                            selfiePath.startsWith("http://") || selfiePath.startsWith("https://") -> selfiePath
+                            selfiePath.startsWith("attendance-selfies/") -> "${com.example.network.ArtifyBackendConfig.SUPABASE_URL}/storage/v1/object/public/$selfiePath"
+                            File(selfiePath).exists() -> File(selfiePath)
+                            else -> null
+                        }
+                        if (selfieModel != null) {
                             AsyncImage(
-                                model = selfieFile,
+                                model = selfieModel,
                                 contentDescription = "Biometric Shift Selfie",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

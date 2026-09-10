@@ -51,7 +51,8 @@ class RealWorkerViewModel(
     private val locationHelper: LocationHelper,
     private val syncManager: RealSyncManager,
     private val offlineCache: OfflineCache,
-    private val employeeId: String
+    private val employeeId: String,
+    private val storageService: SupabaseStorageService? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RealWorkerUiState())
@@ -189,9 +190,22 @@ class RealWorkerViewModel(
         )
     }
 
-    /** Lazily resolves and caches a signed URL for a selfie evidence path. */
+    /** Lazily resolves and caches a signed or public URL for a selfie evidence path. */
     fun loadSelfieUrl(storagePath: String) {
         if (_uiState.value.selfieUrlCache.containsKey(storagePath)) return
+        if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
+            _uiState.value = _uiState.value.copy(
+                selfieUrlCache = _uiState.value.selfieUrlCache + (storagePath to storagePath)
+            )
+            return
+        }
+        if (storagePath.startsWith("attendance-selfies/")) {
+            val publicUrl = "${ArtifyBackendConfig.SUPABASE_URL}/storage/v1/object/public/$storagePath"
+            _uiState.value = _uiState.value.copy(
+                selfieUrlCache = _uiState.value.selfieUrlCache + (storagePath to publicUrl)
+            )
+            return
+        }
         viewModelScope.launch {
             when (val result = repository.getMySelfieUrl(storagePath)) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(
@@ -207,10 +221,28 @@ class RealWorkerViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showStartShiftDialog = false)
             val location = locationHelper.getCurrentLocation()
+            val localFile = File(selfieFilePath)
+
+            // Step 1: Upload new selfie to Supabase Storage if available
+            var uploadedPublicUrl: String? = null
+            if (storageService != null && localFile.exists()) {
+                val fileName = "selfie_${employeeId}_${System.currentTimeMillis()}.jpg"
+                val uploadResult = storageService.uploadSelfieFile(localFile, fileName)
+                if (uploadResult.isSuccess) {
+                    val url = uploadResult.getOrThrow()
+                    // Step 2: Verify accessibility
+                    if (storageService.verifySelfieAccessible(url)) {
+                        uploadedPublicUrl = url
+                        Log.i("RealWorkerViewModel", "Shift-start selfie uploaded and verified in storage: $url")
+                    }
+                }
+            }
+
             val selfieBase64 = encodeSelfie(selfieFilePath)
             val clientEventId = UUID.randomUUID().toString()
             val deviceTimestamp = Instant.now().toString()
 
+            // Step 3: Clock in via Backend API
             val result = repository.clockIn(
                 clientEventId = clientEventId, deviceTimestamp = deviceTimestamp,
                 latitude = location?.latitude, longitude = location?.longitude,
@@ -218,9 +250,18 @@ class RealWorkerViewModel(
             )
             when (result) {
                 is BackendResult.Success -> {
+                    // Update cache with verified URL immediately so UI renders without delay
+                    val shift = result.value.shift
+                    val updatedCache = if (uploadedPublicUrl != null) {
+                        _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl) + (shift.clockIn?.selfieStoragePath.orEmpty() to uploadedPublicUrl)
+                    } else _uiState.value.selfieUrlCache
+
+                    // Delete old temporary capture file
                     runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(
-                        isProcessing = false, activeShift = result.value.shift,
+                        isProcessing = false,
+                        activeShift = shift,
+                        selfieUrlCache = updatedCache,
                         statusMessage = "Shift started."
                     )
                 }

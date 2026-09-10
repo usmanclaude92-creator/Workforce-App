@@ -26,7 +26,7 @@ class AttendanceVerificationEntryTest {
             selfieBase64 = null,
             facialMetadata = FacialMetadataDto(
                 faceDetected = true,
-                detectionConfidence = 0.98,
+                confidence = 0.98f,
                 complianceStatus = "VERIFIED",
                 complianceReason = "Optimal pose and lighting"
             )
