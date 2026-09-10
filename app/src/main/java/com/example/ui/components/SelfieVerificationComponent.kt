@@ -272,9 +272,22 @@ fun SelfieVerificationComponent(
             statusMessage = "Connecting to Supabase and logging attendance verification..."
 
             coroutineScope.launch {
+                val tempFile = withContext(Dispatchers.IO) {
+                    try {
+                        val file = File(context.cacheDir, "selfie_${System.currentTimeMillis()}.jpg")
+                        val fos = java.io.FileOutputStream(file)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos)
+                        fos.flush()
+                        fos.close()
+                        file
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
                 val base64Image = withContext(Dispatchers.Default) {
                     val baos = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
                     Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
                 }
 
@@ -285,7 +298,8 @@ fun SelfieVerificationComponent(
                     projectName = projectName,
                     verificationType = verificationType,
                     selfieBase64 = base64Image,
-                    facialMetadata = metadata.toDto()
+                    facialMetadata = metadata.toDto(),
+                    selfieFile = tempFile
                 )
 
                 verificationResult = result

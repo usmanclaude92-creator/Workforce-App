@@ -19,6 +19,9 @@ interface PendingSyncDao {
     @Query("SELECT * FROM pending_attendance_events WHERE employeeId = :employeeId AND syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
     suspend fun getUnsyncedAttendanceEvents(employeeId: String): List<PendingAttendanceEventEntity>
 
+    @Query("SELECT * FROM pending_attendance_events WHERE syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
+    suspend fun getAllUnsyncedAttendanceEvents(): List<PendingAttendanceEventEntity>
+
     @Query("SELECT * FROM pending_attendance_events WHERE employeeId = :employeeId ORDER BY queuedAtEpochMs DESC")
     fun observeAttendanceEvents(employeeId: String): Flow<List<PendingAttendanceEventEntity>>
 
@@ -33,6 +36,9 @@ interface PendingSyncDao {
 
     @Query("SELECT * FROM pending_leave_requests WHERE employeeId = :employeeId AND syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
     suspend fun getUnsyncedLeaveRequests(employeeId: String): List<PendingLeaveRequestEntity>
+
+    @Query("SELECT * FROM pending_leave_requests WHERE syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
+    suspend fun getAllUnsyncedLeaveRequests(): List<PendingLeaveRequestEntity>
 
     @Query("SELECT * FROM pending_leave_requests WHERE employeeId = :employeeId ORDER BY queuedAtEpochMs DESC")
     fun observeLeaveRequests(employeeId: String): Flow<List<PendingLeaveRequestEntity>>

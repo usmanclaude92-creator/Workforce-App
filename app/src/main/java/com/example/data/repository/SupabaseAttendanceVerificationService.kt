@@ -43,9 +43,11 @@ class SupabaseAttendanceVerificationService(
     private val sessionStore: SecureSessionStore = SecureSessionStore(context)
 ) {
     private val api = ArtifyBackendConfig.api
+    private val storageService = SupabaseStorageService(context, sessionStore)
 
     /**
      * Stores a selfie attendance verification entry with facial metadata in the Supabase database.
+     * Direct Supabase Storage upload is attempted first to prevent huge Base64 strings in JSON.
      */
     suspend fun storeVerificationEntry(
         employeeId: String,
@@ -59,13 +61,38 @@ class SupabaseAttendanceVerificationService(
         longitude: Double? = null,
         gpsAccuracy: Float? = null,
         isMockLocation: Boolean = false,
-        notes: String? = null
+        notes: String? = null,
+        selfieFile: java.io.File? = null
     ): AttendanceVerificationResult = withContext(Dispatchers.IO) {
         val entryId = UUID.randomUUID().toString()
         val clientEventId = "VERIF_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
         val isoTimestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
+
+        // Decouple storage tier: upload binary directly to Supabase Storage bucket
+        var storageUrl: String? = null
+        if (selfieFile != null && selfieFile.exists()) {
+            val uploadResult = storageService.uploadSelfieFile(selfieFile)
+            if (uploadResult.isSuccess) {
+                storageUrl = uploadResult.getOrNull()
+            }
+        } else if (!selfieBase64.isNullOrBlank() && !selfieBase64.startsWith("http")) {
+            try {
+                val bytes = android.util.Base64.decode(selfieBase64, android.util.Base64.DEFAULT)
+                val fileName = "selfie_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.jpg"
+                val uploadResult = storageService.uploadBytes(bytes, fileName)
+                if (uploadResult.isSuccess) {
+                    storageUrl = uploadResult.getOrNull()
+                }
+            } catch (_: Exception) {}
+        } else if (selfieBase64?.startsWith("http") == true) {
+            storageUrl = selfieBase64
+        }
+
+        // When storageUrl is populated, strip heavy Base64 payload from table/function JSON
+        val finalSelfieUrl = storageUrl
+        val finalSelfieBase64 = if (storageUrl != null) null else selfieBase64
 
         val entry = AttendanceVerificationEntry(
             id = entryId,
@@ -76,7 +103,8 @@ class SupabaseAttendanceVerificationService(
             projectName = projectName ?: "Active Worksite",
             verificationType = verificationType,
             deviceTimestamp = isoTimestamp,
-            selfieBase64 = selfieBase64,
+            selfieUrl = finalSelfieUrl,
+            selfieBase64 = finalSelfieBase64,
             facialMetadata = facialMetadata,
             latitude = latitude,
             longitude = longitude,
@@ -153,7 +181,8 @@ class SupabaseAttendanceVerificationService(
                 serverTimestamp = serverTimestamp ?: isoTimestamp
             )
         } else {
-            // If offline, queue locally and return success confirmation to the user
+            // If offline, queue locally and enqueue WorkManager background sync
+            com.example.data.sync.AttendanceSyncWorker.enqueueOneTimeWork(context)
             AttendanceVerificationResult.OfflineQueued(
                 entryId = entryId,
                 message = "Biometric metadata verified and saved to local secure cache. Synchronizing with Supabase database as connection permits."

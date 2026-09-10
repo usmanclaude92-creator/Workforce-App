@@ -15,6 +15,14 @@ import java.io.File
 class ArtifyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize WorkManager background sync to guarantee offline attendance reconciliation
+        try {
+            com.example.data.sync.AttendanceSyncWorker.schedulePeriodicWork(this)
+        } catch (e: Exception) {
+            android.util.Log.w("ArtifyApplication", "Could not initialize WorkManager sync: ${e.message}")
+        }
+
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {

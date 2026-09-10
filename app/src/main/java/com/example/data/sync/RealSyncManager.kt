@@ -48,6 +48,7 @@ class RealSyncManager(
     private val employeeId: String
 ) {
     private val dao = RealSyncDatabase.getInstance(context).pendingSyncDao()
+    private val storageService = com.example.data.repository.SupabaseStorageService(context)
     private val syncMutex = Mutex()
 
     private val _status = MutableStateFlow(SyncQueueStatus(isOnline = networkMonitor.isOnlineNow()))
@@ -90,6 +91,7 @@ class RealSyncManager(
             )
         )
         refreshCounts()
+        AttendanceSyncWorker.enqueueOneTimeWork(context)
     }
 
     suspend fun queueLeaveRequest(clientRequestId: String, leaveType: String, startDate: String, endDate: String, reason: String) {
@@ -100,6 +102,7 @@ class RealSyncManager(
             )
         )
         refreshCounts()
+        AttendanceSyncWorker.enqueueOneTimeWork(context)
     }
 
     /** [force] ignores backoff timers — used by the user-facing "Sync Now" action. */
@@ -139,11 +142,15 @@ class RealSyncManager(
     /** Returns true if this item is now synced (or was already), false if the batch should stop here. */
     private suspend fun syncAttendanceEvent(item: PendingAttendanceEventEntity): Boolean {
         dao.updateAttendanceEvent(item.copy(syncStatus = SyncStatus.SYNCING))
-        val selfieBase64 = item.selfieLocalPath?.let { encodeSelfieFile(it) }
+        val selfieFile = item.selfieLocalPath?.let { File(it) }
+        val storageUrl = if (selfieFile != null && selfieFile.exists()) {
+            storageService.uploadSelfieFile(selfieFile).getOrNull()
+        } else null
+        val selfiePayload = storageUrl ?: item.selfieLocalPath?.let { encodeSelfieFile(it) }
         val result = if (item.action == "clock_in") {
-            repository.clockIn(item.clientEventId, item.deviceTimestamp, item.latitude, item.longitude, item.gpsAccuracyMeters, item.isMockLocation, selfieBase64)
+            repository.clockIn(item.clientEventId, item.deviceTimestamp, item.latitude, item.longitude, item.gpsAccuracyMeters, item.isMockLocation, selfiePayload)
         } else {
-            repository.clockOut(item.clientEventId, item.deviceTimestamp, item.latitude, item.longitude, item.gpsAccuracyMeters, item.isMockLocation, selfieBase64)
+            repository.clockOut(item.clientEventId, item.deviceTimestamp, item.latitude, item.longitude, item.gpsAccuracyMeters, item.isMockLocation, selfiePayload)
         }
         return when (result) {
             is BackendResult.Success -> {

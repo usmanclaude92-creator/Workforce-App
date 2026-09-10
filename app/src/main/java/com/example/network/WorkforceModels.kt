@@ -74,6 +74,7 @@ data class AttendanceVerificationEntry(
     @Json(name = "project_name") val projectName: String? = null,
     @Json(name = "verification_type") val verificationType: String = "SELFIE_VERIFICATION",
     @Json(name = "device_timestamp") val deviceTimestamp: String,
+    @Json(name = "selfie_url") val selfieUrl: String? = null,
     @Json(name = "selfie_base64") val selfieBase64: String? = null,
     @Json(name = "facial_metadata") val facialMetadata: FacialMetadataDto,
     val latitude: Double? = null,
