@@ -247,6 +247,7 @@ class WorkerViewModel(
     }
 
     fun startShift(selfieData: String) {
+        if (_uiState.value.isProcessing) return
         val project = _uiState.value.assignedProject
         if (project == null) {
             _uiState.value = _uiState.value.copy(errorMessage = "No active assigned project found.")
@@ -284,6 +285,7 @@ class WorkerViewModel(
     }
 
     fun endShift(selfieData: String? = null) {
+        if (_uiState.value.isProcessing) return
         val project = _uiState.value.assignedProject
         if (project == null) {
             _uiState.value = _uiState.value.copy(errorMessage = "No assigned project found.")
@@ -327,6 +329,11 @@ class WorkerViewModel(
         totalDays: Int,
         reason: String
     ) {
+        if (_uiState.value.isProcessing) return
+        if (reason.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Please enter a reason for the leave request.")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
             val result = repository.submitLeaveRequest(

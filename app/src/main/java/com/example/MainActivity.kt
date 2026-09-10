@@ -38,7 +38,6 @@ import com.example.ui.screens.SupervisorDashboardScreen
 import com.example.ui.screens.WorkerDashboardScreen
 import com.example.ui.theme.ArtifyTheme
 import com.example.ui.theme.ThemePreferences
-import com.example.ui.viewmodel.AiAssistantViewModel
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.RealAuthScreenState
 import com.example.ui.viewmodel.RealAuthViewModel
@@ -115,6 +114,23 @@ fun ArtifyAppRoot() {
     val realAuthViewModel = remember { RealAuthViewModel(realAuthRepository) }
     val realAuthState by realAuthViewModel.uiState.collectAsState()
 
+    // Dynamic Permission Launcher for Location, Camera, and Push Notifications
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* handled */ }
+
+    LaunchedEffect(Unit) {
+        val permissionsToRequest = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.CAMERA
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(permissionsToRequest.toTypedArray())
+    }
+
     // Demo Mode's database/repository/view model are intentionally NOT created until a
     // demo account is actually requested. Building them eagerly here would seed the local
     // Demo database and start the Firestore sync manager on every single app launch, even
@@ -133,17 +149,28 @@ fun ArtifyAppRoot() {
     val demoAuthState = demoAuthViewModel?.uiState?.collectAsState()?.value
 
     val signedInEmployee = realAuthState.signedInEmployee
+
+    // Register FCM notifications for authenticated Real Mode employee
+    LaunchedEffect(signedInEmployee?.id) {
+        signedInEmployee?.let { emp ->
+            FcmNotificationManager.registerEmployeeForPushNotifications(
+                context = context,
+                employeeId = emp.employeeCode,
+                role = emp.role,
+                fullName = emp.fullName
+            )
+        }
+    }
+
     when {
         realAuthState.screen == RealAuthScreenState.SIGNED_IN && signedInEmployee != null -> {
             val backendWorkforceRepository = remember(signedInEmployee.id) {
                 BackendWorkforceRepository(realAuthRepository, SecureSessionStore.getInstance(context))
             }
-            val aiAssistantViewModel = remember(signedInEmployee.id) { AiAssistantViewModel(backendWorkforceRepository) }
             if (signedInEmployee.role == "SUPERVISOR" || signedInEmployee.role == "ADMIN") {
                 val supervisorViewModel = remember(signedInEmployee.id) { RealSupervisorViewModel(backendWorkforceRepository) }
                 RealSupervisorDashboardScreen(
                     viewModel = supervisorViewModel,
-                    aiAssistantViewModel = aiAssistantViewModel,
                     supervisorName = signedInEmployee.fullName,
                     supervisorCode = signedInEmployee.employeeCode,
                     onLogout = { realAuthViewModel.logout() }
@@ -159,7 +186,6 @@ fun ArtifyAppRoot() {
                 }
                 RealWorkerDashboardScreen(
                     viewModel = workerViewModel,
-                    aiAssistantViewModel = aiAssistantViewModel,
                     employeeName = signedInEmployee.fullName,
                     employeeCode = signedInEmployee.employeeCode,
                     onLogout = { realAuthViewModel.logout() }

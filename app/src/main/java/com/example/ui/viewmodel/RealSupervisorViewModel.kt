@@ -1,5 +1,6 @@
 package com.example.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
@@ -10,6 +11,7 @@ import com.example.network.ErpEventDto
 import com.example.network.LeaveRequestDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
+import com.example.notifications.FcmNotificationManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -110,6 +112,61 @@ class RealSupervisorViewModel(private val repository: BackendWorkforceRepository
                     refresh()
                 }
                 is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    fun assignShiftAndNotifyEmployee(
+        context: Context,
+        supervisorName: String,
+        employeeId: String,
+        employeeName: String,
+        projectName: String,
+        shiftDate: String,
+        shiftTiming: String,
+        notes: String?,
+        isScheduleChange: Boolean = false,
+        changeReason: String? = null,
+        oldTiming: String? = null
+    ) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            try {
+                if (isScheduleChange) {
+                    FcmNotificationManager.dispatchScheduleChangeAlert(
+                        context = context,
+                        employeeId = employeeId,
+                        employeeName = employeeName,
+                        projectName = projectName,
+                        shiftDate = shiftDate,
+                        newTiming = shiftTiming,
+                        oldTiming = oldTiming,
+                        supervisorName = supervisorName,
+                        changeReason = changeReason
+                    )
+                } else {
+                    FcmNotificationManager.dispatchShiftAssignmentAlert(
+                        context = context,
+                        employeeId = employeeId,
+                        employeeName = employeeName,
+                        projectName = projectName,
+                        shiftDate = shiftDate,
+                        shiftTiming = shiftTiming,
+                        supervisorName = supervisorName,
+                        notes = notes
+                    )
+                }
+                val actionLabel = if (isScheduleChange) "Schedule update" else "Shift assignment"
+                _uiState.value = _uiState.value.copy(
+                    isProcessing = false,
+                    statusMessage = "✓ $actionLabel push alert dispatched to $employeeName via Firebase Cloud Messaging."
+                )
+                refresh()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isProcessing = false,
+                    errorMessage = "Error sending push alert: ${e.message}"
+                )
             }
         }
     }

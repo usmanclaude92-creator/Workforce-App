@@ -1,5 +1,6 @@
 package com.example.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.entity.*
@@ -246,6 +247,46 @@ class SupervisorViewModel(
                 _uiState.value = _uiState.value.copy(
                     isProcessing = false,
                     errorMessage = error.message ?: "Failed to reject leave."
+                )
+            }
+        }
+    }
+
+    fun assignShiftAndNotifyEmployee(
+        context: Context,
+        employeeId: String,
+        projectId: String,
+        shiftDate: String,
+        shiftTiming: String,
+        notes: String?,
+        isScheduleChange: Boolean = false,
+        changeReason: String? = null,
+        oldTiming: String? = null
+    ) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            val result = repository.assignShiftOrSchedule(
+                context = context,
+                supervisor = supervisor,
+                employeeId = employeeId,
+                projectId = projectId,
+                shiftDate = shiftDate,
+                shiftTiming = shiftTiming,
+                notes = notes,
+                isScheduleChange = isScheduleChange,
+                changeReason = changeReason,
+                oldTiming = oldTiming
+            )
+            result.onSuccess {
+                val action = if (isScheduleChange) "Schedule change alert" else "Shift assignment alert"
+                _uiState.value = _uiState.value.copy(
+                    isProcessing = false,
+                    statusMessage = "✓ $action successfully dispatched to employee via Firebase Cloud Messaging!"
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isProcessing = false,
+                    errorMessage = error.message ?: "Failed to assign shift."
                 )
             }
         }

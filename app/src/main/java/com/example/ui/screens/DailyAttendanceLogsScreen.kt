@@ -66,7 +66,7 @@ fun DailyAttendanceLogsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedRecordForDetail by remember { mutableStateOf<AttendanceEntity?>(null) }
 
-    // Computed filtered list
+    // Computed filtered list sorted latest attendance first
     val filteredLogs = remember(attendanceLogs, selectedFilter, searchQuery) {
         attendanceLogs.filter { log ->
             val matchesFilter = when (selectedFilter) {
@@ -84,7 +84,16 @@ fun DailyAttendanceLogsScreen(
                         (log.state.contains(searchQuery, ignoreCase = true))
             }
             matchesFilter && matchesSearch
-        }
+        }.sortedWith(
+            compareByDescending<AttendanceEntity> {
+                // In-progress shifts (no endTimeUtc) come first
+                if (it.endTimeUtc == null) 1 else 0
+            }.thenByDescending {
+                it.startTimeUtc ?: it.createdAtUtc
+            }.thenByDescending {
+                it.shiftDate
+            }
+        )
     }
 
     // Statistics computed from Room database records

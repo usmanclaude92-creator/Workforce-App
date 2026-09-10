@@ -40,6 +40,7 @@ data class RealWorkerUiState(
     val syncQueue: SyncQueueStatus = SyncQueueStatus(),
     val notifications: List<NotificationDto> = emptyList(),
     val profile: ProfileDto? = null,
+    val localAvatarPath: String? = null,
     val selfieUrlCache: Map<String, String> = emptyMap(),
     val shiftDurationFormatted: String = "00:00:00"
 )
@@ -55,6 +56,9 @@ class RealWorkerViewModel(
 
     private val _uiState = MutableStateFlow(RealWorkerUiState())
     val uiState: StateFlow<RealWorkerUiState> = _uiState.asStateFlow()
+
+    private val _shiftDurationFormatted = MutableStateFlow("00:00:00")
+    val shiftDurationFormatted: StateFlow<String> = _shiftDurationFormatted.asStateFlow()
 
     /** True while a clock-in has been queued locally and hasn't synced yet — clock-out must also queue until it does. */
     private var pendingLocalClockIn = false
@@ -98,7 +102,7 @@ class RealWorkerViewModel(
                 } else {
                     "00:00:00"
                 }
-                _uiState.value = _uiState.value.copy(shiftDurationFormatted = formatted)
+                _shiftDurationFormatted.value = formatted
                 delay(1000L)
             }
         }
@@ -112,14 +116,26 @@ class RealWorkerViewModel(
                     is BackendResult.Success -> {
                         offlineCache.cacheShifts(employeeId, result.value)
                         val active = result.value.firstOrNull { it.status == "OPEN" }
-                        val history = result.value.filter { it.status != "OPEN" }
+                        val history = result.value
+                            .filter { it.status != "OPEN" }
+                            .sortedWith(
+                                compareByDescending<AttendanceShiftDto> {
+                                    it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
+                                }.thenByDescending { it.shiftDate }
+                            )
                         _uiState.value = _uiState.value.copy(activeShift = active, shiftHistory = history, isLoading = false)
                     }
                     is BackendResult.Failure -> {
                         val cached = if (result.isNetworkError) offlineCache.getCachedShifts(employeeId) else null
                         if (cached != null) {
                             val active = cached.firstOrNull { it.status == "OPEN" }
-                            val history = cached.filter { it.status != "OPEN" }
+                            val history = cached
+                                .filter { it.status != "OPEN" }
+                                .sortedWith(
+                                    compareByDescending<AttendanceShiftDto> {
+                                        it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
+                                    }.thenByDescending { it.shiftDate }
+                                )
                             _uiState.value = _uiState.value.copy(activeShift = active, shiftHistory = history, isLoading = false)
                         } else {
                             _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = result.message)
@@ -166,6 +182,13 @@ class RealWorkerViewModel(
     fun clearFeedback() { _uiState.value = _uiState.value.copy(statusMessage = null, errorMessage = null) }
     fun syncNow() { viewModelScope.launch { syncManager.syncNow(force = true) } }
 
+    fun updateProfilePhoto(filePath: String) {
+        _uiState.value = _uiState.value.copy(
+            localAvatarPath = filePath,
+            statusMessage = "Profile photo updated successfully"
+        )
+    }
+
     /** Lazily resolves and caches a signed URL for a selfie evidence path. */
     fun loadSelfieUrl(storagePath: String) {
         if (_uiState.value.selfieUrlCache.containsKey(storagePath)) return
@@ -180,6 +203,7 @@ class RealWorkerViewModel(
     }
 
     fun startShift(selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showStartShiftDialog = false)
             val location = locationHelper.getCurrentLocation()
@@ -194,6 +218,7 @@ class RealWorkerViewModel(
             )
             when (result) {
                 is BackendResult.Success -> {
+                    runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false, activeShift = result.value.shift,
                         statusMessage = "Shift started."
@@ -202,6 +227,7 @@ class RealWorkerViewModel(
                 is BackendResult.Failure -> {
                     if (result.isNetworkError) {
                         syncManager.queueClockEvent(clientEventId, "clock_in", deviceTimestamp, location?.latitude, location?.longitude, location?.accuracy, location?.isMock ?: false, selfieFilePath)
+                        runCatching { File(selfieFilePath).delete() }
                         pendingLocalClockIn = true
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false,
@@ -209,6 +235,7 @@ class RealWorkerViewModel(
                             statusMessage = "You're offline — shift queued and will sync automatically once connected."
                         )
                     } else {
+                        runCatching { File(selfieFilePath).delete() }
                         _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
                     }
                 }
@@ -217,6 +244,7 @@ class RealWorkerViewModel(
     }
 
     fun endShift(selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showEndShiftDialog = false)
             val location = locationHelper.getCurrentLocation()
@@ -231,6 +259,7 @@ class RealWorkerViewModel(
             )
             when (result) {
                 is BackendResult.Success -> {
+                    runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false, activeShift = null,
                         statusMessage = "Shift ended — submitted for supervisor approval."
@@ -240,11 +269,13 @@ class RealWorkerViewModel(
                 is BackendResult.Failure -> {
                     if (result.isNetworkError) {
                         syncManager.queueClockEvent(clientEventId, "clock_out", deviceTimestamp, location?.latitude, location?.longitude, location?.accuracy, location?.isMock ?: false, selfieFilePath)
+                        runCatching { File(selfieFilePath).delete() }
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false, activeShift = null,
                             statusMessage = "You're offline — clock-out queued and will sync automatically once connected."
                         )
                     } else {
+                        runCatching { File(selfieFilePath).delete() }
                         _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
                     }
                 }
@@ -253,6 +284,15 @@ class RealWorkerViewModel(
     }
 
     fun submitLeave(leaveType: String, startDate: String, endDate: String, reason: String) {
+        if (_uiState.value.isProcessing) return
+        if (reason.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Please enter a reason for the leave request.")
+            return
+        }
+        if (startDate.isBlank() || endDate.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Please specify valid start and end dates.")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
             val clientRequestId = UUID.randomUUID().toString()
@@ -280,12 +320,7 @@ class RealWorkerViewModel(
         clockIn = AttendanceEventSummary(serverTimestamp = null, geofenceStatus = null, distanceFromProjectMeters = null)
     )
 
-    private fun encodeSelfie(filePath: String): String? {
-        return try {
-            val bytes = File(filePath).readBytes()
-            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        } catch (e: Exception) {
-            null
-        }
+    private suspend fun encodeSelfie(filePath: String): String? {
+        return com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(filePath)
     }
 }

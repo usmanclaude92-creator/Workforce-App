@@ -478,6 +478,78 @@ class WorkforceRepository(
     fun getAllUsers(): Flow<List<UserEntity>> = userDao.getAllUsers()
     fun getUsersByRole(role: String): Flow<List<UserEntity>> = userDao.getUsersByRole(role)
 
+    suspend fun assignShiftOrSchedule(
+        context: Context,
+        supervisor: UserEntity,
+        employeeId: String,
+        projectId: String,
+        shiftDate: String,
+        shiftTiming: String,
+        notes: String?,
+        isScheduleChange: Boolean = false,
+        changeReason: String? = null,
+        oldTiming: String? = null
+    ): Result<Unit> {
+        val employee = userDao.getUserByEmployeeId(employeeId)
+            ?: return Result.failure(Exception("Employee $employeeId not found."))
+        val project = projectDao.getProjectById(projectId)
+            ?: return Result.failure(Exception("Project site $projectId not found."))
+
+        // Update assigned project if changed
+        if (employee.assignedProjectId != projectId) {
+            userDao.insertUser(employee.copy(assignedProjectId = projectId))
+        }
+
+        val serverTime = ServerAuthorityEngine.getServerTimestamp()
+        val actionName = if (isScheduleChange) AuditAction.SCHEDULE_CHANGED.name else AuditAction.SHIFT_ASSIGNED.name
+        val auditDetails = if (isScheduleChange) {
+            "Schedule for ${employee.fullName} ($employeeId) at ${project.projectName} changed to $shiftTiming on $shiftDate by ${supervisor.fullName}. Reason: ${changeReason ?: "Routine adjustment"}."
+        } else {
+            "Assigned new shift to ${employee.fullName} ($employeeId) at ${project.projectName} on $shiftDate ($shiftTiming) by ${supervisor.fullName}."
+        }
+
+        auditDao.insertAuditLog(
+            AuditLogEntity(
+                auditId = "AUD-SFT-" + UUID.randomUUID().toString().take(8),
+                actorId = supervisor.employeeId,
+                actorName = supervisor.fullName,
+                actorRole = supervisor.role,
+                action = actionName,
+                entityType = "SHIFT_SCHEDULE",
+                entityId = employeeId,
+                serverTimestampUtc = serverTime.timestampUtc,
+                details = auditDetails
+            )
+        )
+
+        if (isScheduleChange) {
+            FcmNotificationManager.dispatchScheduleChangeAlert(
+                context = context,
+                employeeId = employee.employeeId,
+                employeeName = employee.fullName,
+                projectName = project.projectName,
+                shiftDate = shiftDate,
+                newTiming = shiftTiming,
+                oldTiming = oldTiming,
+                supervisorName = supervisor.fullName,
+                changeReason = changeReason
+            )
+        } else {
+            FcmNotificationManager.dispatchShiftAssignmentAlert(
+                context = context,
+                employeeId = employee.employeeId,
+                employeeName = employee.fullName,
+                projectName = project.projectName,
+                shiftDate = shiftDate,
+                shiftTiming = shiftTiming,
+                supervisorName = supervisor.fullName,
+                notes = notes
+            )
+        }
+
+        return Result.success(Unit)
+    }
+
     // --- Projects ---
 
     fun getAllProjects(): Flow<List<ProjectEntity>> = projectDao.getAllProjects()
@@ -625,13 +697,15 @@ class WorkforceRepository(
             verificationStatus = if (geofenceResult.isInside && geofenceResult.isAccuracyAcceptable)
                 VerificationStatus.VERIFIED.name
             else
-                VerificationStatus.FLAGGED.name
+                VerificationStatus.FLAGGED.name,
+            syncedToFirestore = false,
+            firestoreSyncStatus = "QUEUED_OFFLINE"
         )
 
         attendanceDao.updateAttendance(updatedShift)
 
-        // Queue shift update to Firestore persistent cache
-        firestoreSyncManager?.queueClockIn(updatedShift)
+        // Queue check-out record to Firestore persistent cache (stored offline in Room + Firestore, auto-synced once online)
+        firestoreSyncManager?.queueClockOut(updatedShift)
 
         // Audit Trail (Synchronized with Head Office Payroll)
         auditDao.insertAuditLog(

@@ -53,6 +53,10 @@ fun WorkerDashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by workerViewModel.uiState.collectAsState()
+    val isDark = LocalIsDarkTheme.current
+    val screenBg = if (isDark) SophisticatedDarkBg else SophisticatedLightBg
+    val navBg = if (isDark) SophisticatedDarkNav else SophisticatedLightNav
+
     var selectedBottomNav by remember { mutableIntStateOf(0) }
     var isRequestingLeave by remember { mutableStateOf(false) }
     var showScenarioDropdown by remember { mutableStateOf(false) }
@@ -80,8 +84,8 @@ fun WorkerDashboardScreen(
         bottomBar = {
             if (!(selectedBottomNav == 2 && isRequestingLeave && repository != null)) {
                 NavigationBar(
-                    containerColor = SophisticatedDarkNav,
-                    contentColor = SophisticatedPrimary,
+                    containerColor = navBg,
+                    contentColor = MaterialTheme.colorScheme.primary,
                     tonalElevation = 0.dp
                 ) {
                     NavigationBarItem(
@@ -91,11 +95,11 @@ fun WorkerDashboardScreen(
                         label = { Text("Shift") },
                         modifier = Modifier.testTag("nav_shift"),
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SophisticatedPrimary,
-                            indicatorColor = SophisticatedPrimaryContainer,
-                            unselectedIconColor = SophisticatedTextSecondary,
-                            unselectedTextColor = SophisticatedTextSecondary,
-                            selectedTextColor = SophisticatedPrimary
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedTextColor = MaterialTheme.colorScheme.primary
                         )
                     )
                     NavigationBarItem(
@@ -105,11 +109,11 @@ fun WorkerDashboardScreen(
                         label = { Text("Daily Logs") },
                         modifier = Modifier.testTag("nav_history"),
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SophisticatedPrimary,
-                            indicatorColor = SophisticatedPrimaryContainer,
-                            unselectedIconColor = SophisticatedTextSecondary,
-                            unselectedTextColor = SophisticatedTextSecondary,
-                            selectedTextColor = SophisticatedPrimary
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedTextColor = MaterialTheme.colorScheme.primary
                         )
                     )
                     NavigationBarItem(
@@ -119,11 +123,11 @@ fun WorkerDashboardScreen(
                         label = { Text("Leave") },
                         modifier = Modifier.testTag("nav_leave"),
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SophisticatedPrimary,
-                            indicatorColor = SophisticatedPrimaryContainer,
-                            unselectedIconColor = SophisticatedTextSecondary,
-                            unselectedTextColor = SophisticatedTextSecondary,
-                            selectedTextColor = SophisticatedPrimary
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedTextColor = MaterialTheme.colorScheme.primary
                         )
                     )
                     NavigationBarItem(
@@ -133,11 +137,11 @@ fun WorkerDashboardScreen(
                         label = { Text("Profile") },
                         modifier = Modifier.testTag("nav_profile"),
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SophisticatedPrimary,
-                            indicatorColor = SophisticatedPrimaryContainer,
-                            unselectedIconColor = SophisticatedTextSecondary,
-                            unselectedTextColor = SophisticatedTextSecondary,
-                            selectedTextColor = SophisticatedPrimary
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedTextColor = MaterialTheme.colorScheme.primary
                         )
                     )
                 }
@@ -148,7 +152,7 @@ fun WorkerDashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(SophisticatedDarkBg)
+                .background(screenBg)
         ) {
             when (selectedBottomNav) {
                 0 -> ShiftDashboardTab(
@@ -517,7 +521,8 @@ private fun ShiftDashboardTab(
                 // Status Header Pill
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Box(
                         modifier = Modifier
@@ -533,7 +538,8 @@ private fun ShiftDashboardTab(
                         color = if (isShiftActive) SophisticatedSuccess else SophisticatedTextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
 
@@ -547,7 +553,8 @@ private fun ShiftDashboardTab(
                     fontWeight = FontWeight.Light,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 2.sp,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -558,7 +565,8 @@ private fun ShiftDashboardTab(
                         text = "Started: ${uiState.activeShift?.startTimeFormatted ?: "08:00:00"}  •  ${uiState.assignedProject?.projectName ?: "Muscat Construction Site A"}",
                         color = SophisticatedTextSecondary,
                         fontSize = 12.sp,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -566,21 +574,24 @@ private fun ShiftDashboardTab(
                         color = SophisticatedSuccess,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 } else {
                     Text(
                         text = "Assigned Site: ${uiState.assignedProject?.projectName ?: "Muscat Construction Site A"}",
                         color = SophisticatedTextSecondary,
                         fontSize = 12.sp,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Ready to record selfie biometric attendance",
                         color = SophisticatedTextMuted,
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }

@@ -48,9 +48,9 @@ data class SyncLogItem(
  *
  * Features:
  * 1. Configures Firestore Persistent Disk Cache (PersistentCacheSettings) with unlimited size.
- * 2. Queues clock-in attempts made while offline in Firestore local cache and Room database.
- * 3. Monitors device network connectivity and automatically synchronizes queued clock-ins when online.
- * 4. Listens to Firestore snapshot metadata (hasPendingWrites) to detect server sync completion.
+ * 2. Caches attendance check-in and check-out records locally in Room database and Firestore disk cache when offline.
+ * 3. Monitors device network connectivity and automatically synchronizes queued check-in/out records when online.
+ * 4. Listens to Firestore snapshot metadata (hasPendingWrites) to reconcile server sync completion with Room.
  * 5. Provides offline simulation controls (disableNetwork / enableNetwork) for live testing.
  */
 class FirestoreSyncManager private constructor(
@@ -189,17 +189,17 @@ class FirestoreSyncManager private constructor(
                     override fun onAvailable(network: Network) {
                         Log.i(TAG, "Network connection RESTORED. Triggering automatic Firestore sync.")
                         _isOnline.value = true
-                        addLog("Network connection restored. Auto-synchronizing offline clock-ins...", true)
+                        addLog("Network connection restored. Auto-synchronizing offline attendance records...", true)
                         scope.launch {
                             enableFirestoreNetwork()
-                            syncPendingClockIns()
+                            syncPendingAttendanceRecords()
                         }
                     }
 
                     override fun onLost(network: Network) {
                         Log.w(TAG, "Network connection LOST. Switching to Firestore offline queue mode.")
                         _isOnline.value = false
-                        addLog("Device is offline. Clock-in attempts will be queued in local persistent cache.", false)
+                        addLog("Device is offline. Attendance records will be cached locally in Room and Firestore.", false)
                     }
                 })
             }
@@ -217,41 +217,45 @@ class FirestoreSyncManager private constructor(
     }
 
     /**
-     * Queues a clock-in attempt into Firestore and Room.
-     * When offline, Firestore automatically saves the write mutation to its persistent disk cache.
-     * When network connectivity is restored, Firestore transmits it to the server automatically.
+     * Queues an attendance record (check-in or check-out) into Firestore and Room.
+     * When offline, Firestore automatically saves the write mutation to its persistent disk cache,
+     * and Room stores the record with syncedToFirestore = false and status QUEUED_OFFLINE.
+     * When network connectivity is restored, it is automatically uploaded to Firestore Cloud.
      */
-    suspend fun queueClockIn(attendance: AttendanceEntity): Result<Boolean> {
+    suspend fun queueAttendanceRecord(attendance: AttendanceEntity): Result<Boolean> {
         return try {
+            val isCheckOut = attendance.endTimeUtc != null
+            val actionLabel = if (isCheckOut) "Clock-Out" else "Clock-In"
             val isCurrentlyOnline = _isOnline.value
             val initialStatus = if (isCurrentlyOnline) "SYNCING" else "QUEUED_OFFLINE"
-            
+
             // Ensure local DB record reflects the sync status
             attendanceDao.updateFirestoreSyncStatus(attendance.attendanceId, initialStatus)
 
-            val payload = buildFirestoreClockInPayload(attendance, isCurrentlyOnline)
+            val payload = buildFirestoreAttendancePayload(attendance, isCurrentlyOnline)
             val firestore = firestoreInstance ?: FirebaseFirestore.getInstance()
 
-            // Write to "clock_ins" and "attendance_records" collections in Firestore
-            val clockInRef = firestore.collection("clock_ins").document(attendance.attendanceId)
+            // Write to "attendance_records" collection in Firestore (canonical record with full shift lifecycle)
             val attendanceRef = firestore.collection("attendance_records").document(attendance.attendanceId)
-
-            // Even if offline, this call completes immediately by writing to persistent local disk cache
-            clockInRef.set(payload, SetOptions.merge())
             attendanceRef.set(payload, SetOptions.merge())
+
+            // Also mirror to action-specific collection ("clock_ins" or "clock_outs")
+            val actionCollection = if (isCheckOut) "clock_outs" else "clock_ins"
+            val actionRef = firestore.collection(actionCollection).document(attendance.attendanceId)
+            actionRef.set(payload, SetOptions.merge())
 
             // Attach snapshot listener to track when Firestore synchronizes with server
             attachDocumentSyncListener(attendance.attendanceId)
 
             if (!isCurrentlyOnline) {
                 addLog(
-                    "Clock-In [${attendance.attendanceId}] queued locally in persistent disk cache (Device Offline).",
+                    "$actionLabel [${attendance.attendanceId}] cached in Room & Firestore persistent disk cache (Device Offline).",
                     true,
                     attendance.attendanceId
                 )
             } else {
                 addLog(
-                    "Clock-In [${attendance.attendanceId}] dispatched to Firestore (Online).",
+                    "$actionLabel [${attendance.attendanceId}] dispatched to Firestore (Online).",
                     true,
                     attendance.attendanceId
                 )
@@ -259,14 +263,30 @@ class FirestoreSyncManager private constructor(
 
             Result.success(true)
         } catch (e: Exception) {
-            Log.e(TAG, "Error queueing clock-in to Firestore: ${e.message}", e)
-            addLog("Failed to queue clock-in ${attendance.attendanceId}: ${e.message}", false, attendance.attendanceId)
+            Log.e(TAG, "Error queueing attendance record to Firestore: ${e.message}", e)
+            addLog("Failed to queue attendance ${attendance.attendanceId}: ${e.message}", false, attendance.attendanceId)
             Result.failure(e)
         }
     }
 
-    private fun buildFirestoreClockInPayload(attendance: AttendanceEntity, isOnlineNow: Boolean): Map<String, Any?> {
-        return mapOf(
+    /**
+     * Queues a clock-in attempt into Firestore and Room.
+     */
+    suspend fun queueClockIn(attendance: AttendanceEntity): Result<Boolean> =
+        queueAttendanceRecord(attendance)
+
+    /**
+     * Queues a clock-out record into Firestore and Room.
+     */
+    suspend fun queueClockOut(attendance: AttendanceEntity): Result<Boolean> =
+        queueAttendanceRecord(attendance)
+
+    /**
+     * Constructs comprehensive Firestore payload capturing both check-in and check-out fields.
+     */
+    fun buildFirestoreAttendancePayload(attendance: AttendanceEntity, isOnlineNow: Boolean): Map<String, Any?> {
+        val isCheckOut = attendance.endTimeUtc != null
+        val payload = mutableMapOf<String, Any?>(
             "attendanceId" to attendance.attendanceId,
             "employeeId" to attendance.employeeId,
             "employeeName" to attendance.employeeName,
@@ -288,9 +308,35 @@ class FirestoreSyncManager private constructor(
             "verificationStatus" to attendance.verificationStatus,
             "queuedOffline" to !isOnlineNow,
             "queuedAtUtc" to System.currentTimeMillis(),
+            "recordType" to if (isCheckOut) "CHECK_OUT" else "CHECK_IN",
             "syncSource" to "ANDROID_PERSISTENT_CACHE_V2"
         )
+
+        // Populate check-out fields when shift has concluded
+        if (isCheckOut) {
+            payload["endTimeUtc"] = attendance.endTimeUtc
+            payload["endTimeFormatted"] = attendance.endTimeFormatted
+            payload["totalWorkedMinutes"] = attendance.totalWorkedMinutes
+            payload["endLatitude"] = attendance.endLatitude
+            payload["endLongitude"] = attendance.endLongitude
+            payload["endAccuracy"] = attendance.endAccuracy
+            payload["endGeofenceStatus"] = attendance.endGeofenceStatus
+            payload["endDistanceFromProjectMeters"] = attendance.endDistanceFromProjectMeters
+            payload["isEndMockLocation"] = attendance.isEndMockLocation
+        }
+
+        if (attendance.supervisorComment != null) {
+            payload["supervisorComment"] = attendance.supervisorComment
+        }
+        if (attendance.rejectionReason != null) {
+            payload["rejectionReason"] = attendance.rejectionReason
+        }
+
+        return payload
     }
+
+    private fun buildFirestoreClockInPayload(attendance: AttendanceEntity, isOnlineNow: Boolean): Map<String, Any?> =
+        buildFirestoreAttendancePayload(attendance, isOnlineNow)
 
     /**
      * Attaches a document listener to detect when Firestore server write acknowledges (hasPendingWrites = false).
@@ -300,7 +346,7 @@ class FirestoreSyncManager private constructor(
         if (activeDocumentListeners.containsKey(attendanceId)) return
 
         try {
-            val docRef = firestore.collection("clock_ins").document(attendanceId)
+            val docRef = firestore.collection("attendance_records").document(attendanceId)
             val registration = docRef.addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Snapshot error for $attendanceId: ${error.message}")
@@ -318,7 +364,7 @@ class FirestoreSyncManager private constructor(
                             val now = System.currentTimeMillis()
                             attendanceDao.markAttendanceSyncedToFirestore(attendanceId, now)
                             _lastSyncTimestampUtc.value = now
-                            addLog("Clock-In [$attendanceId] successfully synchronized with Firestore Cloud!", true, attendanceId)
+                            addLog("Attendance [$attendanceId] successfully synchronized with Firestore Cloud!", true, attendanceId)
                             // Remove listener once synced
                             activeDocumentListeners.remove(attendanceId)?.remove()
                         }
@@ -332,9 +378,9 @@ class FirestoreSyncManager private constructor(
     }
 
     /**
-     * Synchronizes all pending un-synced clock-in records from Room database to Firestore.
+     * Synchronizes all pending un-synced attendance records (check-ins and check-outs) from Room database to Firestore.
      */
-    suspend fun syncPendingClockIns(): Int {
+    suspend fun syncPendingAttendanceRecords(): Int {
         _isSyncing.value = true
         var syncedCount = 0
         try {
@@ -345,17 +391,22 @@ class FirestoreSyncManager private constructor(
             }
 
             val firestore = firestoreInstance ?: FirebaseFirestore.getInstance()
-            addLog("Starting automatic synchronization of ${unsyncedList.size} queued clock-in(s)...", true)
+            addLog("Starting automatic synchronization of ${unsyncedList.size} queued attendance record(s)...", true)
 
             for (record in unsyncedList) {
                 try {
-                    val payload = buildFirestoreClockInPayload(record, isOnlineNow = true)
-                    firestore.collection("clock_ins")
+                    val isCheckOut = record.endTimeUtc != null
+                    val payload = buildFirestoreAttendancePayload(record, isOnlineNow = true)
+                    
+                    // 1. Upload to main attendance_records collection
+                    firestore.collection("attendance_records")
                         .document(record.attendanceId)
                         .set(payload, SetOptions.merge())
                         .await()
 
-                    firestore.collection("attendance_records")
+                    // 2. Upload to action-specific collection
+                    val actionCollection = if (isCheckOut) "clock_outs" else "clock_ins"
+                    firestore.collection(actionCollection)
                         .document(record.attendanceId)
                         .set(payload, SetOptions.merge())
                         .await()
@@ -363,14 +414,15 @@ class FirestoreSyncManager private constructor(
                     val now = System.currentTimeMillis()
                     attendanceDao.markAttendanceSyncedToFirestore(record.attendanceId, now)
                     syncedCount++
-                    addLog("Queued Clock-In [${record.attendanceId}] uploaded to Firestore Cloud.", true, record.attendanceId)
+                    val actionLabel = if (isCheckOut) "Clock-Out" else "Clock-In"
+                    addLog("Queued $actionLabel [${record.attendanceId}] uploaded to Firestore Cloud.", true, record.attendanceId)
                 } catch (recordEx: Exception) {
                     Log.w(TAG, "Failed syncing item ${record.attendanceId}: ${recordEx.message}")
                 }
             }
 
             _lastSyncTimestampUtc.value = System.currentTimeMillis()
-            addLog("Synchronization complete: $syncedCount record(s) synced.", true)
+            addLog("Synchronization complete: $syncedCount attendance record(s) synced.", true)
         } catch (e: Exception) {
             Log.e(TAG, "Error during batch synchronization: ${e.message}", e)
             addLog("Sync batch encountered error: ${e.message}", false)
@@ -379,6 +431,9 @@ class FirestoreSyncManager private constructor(
         }
         return syncedCount
     }
+
+    /** Backward compatibility alias for syncPendingAttendanceRecords */
+    suspend fun syncPendingClockIns(): Int = syncPendingAttendanceRecords()
 
     /**
      * Checks if local pending writes in Firestore have completed.
@@ -403,12 +458,12 @@ class FirestoreSyncManager private constructor(
                 if (enableOnline) {
                     enableFirestoreNetwork()
                     _isOnline.value = true
-                    addLog("Simulated Network: ONLINE. Triggering synchronization...", true)
-                    syncPendingClockIns()
+                    addLog("Simulated Network: ONLINE. Triggering automatic synchronization...", true)
+                    syncPendingAttendanceRecords()
                 } else {
                     disableFirestoreNetwork()
                     _isOnline.value = false
-                    addLog("Simulated Network: OFFLINE. Clock-in attempts will be queued locally.", false)
+                    addLog("Simulated Network: OFFLINE. Check-in/out records will be cached locally.", false)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error simulating network: ${e.message}")

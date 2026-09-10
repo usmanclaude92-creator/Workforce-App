@@ -40,6 +40,10 @@ object FcmNotificationManager {
     const val CHANNEL_NAME_SUPERVISOR_ALERTS = "Supervisor Action Required (Leave Requests)"
     const val CHANNEL_DESC_SUPERVISOR_ALERTS = "High-priority instant alerts notifying supervisors when team members submit new leave requests."
 
+    const val CHANNEL_ID_SHIFT_SCHEDULE = "shift_schedule_channel"
+    const val CHANNEL_NAME_SHIFT_SCHEDULE = "Shift & Schedule Alerts"
+    const val CHANNEL_DESC_SHIFT_SCHEDULE = "Real-time alerts to employees for new shift assignments, roster updates, or schedule changes."
+
     private val firestore by lazy {
         try {
             FirebaseFirestore.getInstance()
@@ -83,14 +87,28 @@ object FcmNotificationManager {
             }
             notificationManager.createNotificationChannel(supervisorChannel)
 
-            Log.d(TAG, "Notification channels registered: $CHANNEL_ID_WORKFORCE, $CHANNEL_ID_SUPERVISOR_ALERTS")
+            // High-Priority Shift Assignments & Schedule Alerts Channel
+            val shiftScheduleChannel = NotificationChannel(
+                CHANNEL_ID_SHIFT_SCHEDULE,
+                CHANNEL_NAME_SHIFT_SCHEDULE,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = CHANNEL_DESC_SHIFT_SCHEDULE
+                enableLights(true)
+                enableVibration(true)
+                setShowBadge(true)
+                vibrationPattern = longArrayOf(0, 300, 150, 300)
+            }
+            notificationManager.createNotificationChannel(shiftScheduleChannel)
+
+            Log.d(TAG, "Notification channels registered: $CHANNEL_ID_WORKFORCE, $CHANNEL_ID_SUPERVISOR_ALERTS, $CHANNEL_ID_SHIFT_SCHEDULE")
         }
     }
 
     /**
-     * Registers current FCM token and subscribes the employee to their dedicated notification topic.
+     * Registers current FCM token and subscribes the employee to their dedicated notification topics.
      */
-    fun registerUserForPushNotifications(context: Context, user: UserEntity) {
+    fun registerEmployeeForPushNotifications(context: Context, employeeId: String, role: String, fullName: String) {
         createNotificationChannels(context)
         try {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -100,22 +118,30 @@ object FcmNotificationManager {
                 }
 
                 val token = task.result
-                Log.i(TAG, "FCM Device Token for ${user.fullName} (${user.employeeId}): $token")
+                Log.i(TAG, "FCM Device Token for $fullName ($employeeId): $token")
 
                 // Save token to Firestore employee profile for direct targeting
-                saveFcmTokenToFirestore(user.employeeId, token)
+                saveFcmTokenToFirestore(employeeId, token)
             }
 
-            // Subscribe to personal employee topic (e.g., employee_EMP001)
-            val userTopic = "employee_${user.employeeId.lowercase()}"
+            // Subscribe to personal employee topic (e.g., employee_emp001)
+            val cleanId = employeeId.lowercase().replace("-", "")
+            val userTopic = "employee_$cleanId"
             FirebaseMessaging.getInstance().subscribeToTopic(userTopic).addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     Log.d(TAG, "Subscribed to FCM topic: $userTopic")
                 }
             }
 
+            // Subscribe to general shift & schedule alerts broadcast topic
+            FirebaseMessaging.getInstance().subscribeToTopic("shifts_schedules").addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    Log.d(TAG, "Subscribed to FCM topic: shifts_schedules")
+                }
+            }
+
             // If user is supervisor, also subscribe to supervisors topic
-            if (user.role == "SUPERVISOR") {
+            if (role.equals("SUPERVISOR", ignoreCase = true) || role.equals("ADMIN", ignoreCase = true)) {
                 FirebaseMessaging.getInstance().subscribeToTopic("all_supervisors").addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         Log.d(TAG, "Subscribed to FCM topic: all_supervisors")
@@ -125,6 +151,13 @@ object FcmNotificationManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register FCM topics: ${e.message}")
         }
+    }
+
+    /**
+     * Registers current FCM token and subscribes the employee to their dedicated notification topic.
+     */
+    fun registerUserForPushNotifications(context: Context, user: UserEntity) {
+        registerEmployeeForPushNotifications(context, user.employeeId, user.role, user.fullName)
     }
 
     /**
@@ -326,6 +359,188 @@ object FcmNotificationManager {
                 "employeeId" to employee.employeeId,
                 "employeeName" to employee.fullName,
                 "target_screen" to "SUPERVISOR_LEAVE"
+            )
+        )
+    }
+
+    /**
+     * Dispatches an automated push notification to the employee when a supervisor assigns a new shift.
+     */
+    fun dispatchShiftAssignmentAlert(
+        context: Context,
+        employeeId: String,
+        employeeName: String,
+        projectName: String,
+        shiftDate: String,
+        shiftTiming: String,
+        supervisorName: String,
+        notes: String? = null
+    ) {
+        val title = "📅 New Shift Assigned: $shiftTiming"
+        val body = "You have been assigned to $projectName on $shiftDate ($shiftTiming) by $supervisorName." +
+            if (!notes.isNullOrBlank()) " Instructions: $notes" else ""
+        val notificationId = "NOTIF-SHIFT-" + UUID.randomUUID().toString().take(8)
+
+        // 1. Post to Firestore collection fcm_notifications for server-side push distribution & audit
+        val payload = hashMapOf(
+            "notificationId" to notificationId,
+            "recipientId" to employeeId,
+            "employeeName" to employeeName,
+            "title" to title,
+            "body" to body,
+            "type" to "SHIFT_ASSIGNMENT",
+            "status" to "ASSIGNED",
+            "projectName" to projectName,
+            "shiftDate" to shiftDate,
+            "shiftTiming" to shiftTiming,
+            "supervisorName" to supervisorName,
+            "notes" to (notes ?: ""),
+            "timestampUtc" to System.currentTimeMillis(),
+            "fcmTopic" to "employee_${employeeId.lowercase().replace("-", "")}",
+            "priority" to "HIGH",
+            "delivered" to true
+        )
+
+        try {
+            firestore?.collection("fcm_notifications")
+                ?.document(notificationId)
+                ?.set(payload, SetOptions.merge())
+                ?.addOnSuccessListener {
+                    Log.d(TAG, "FCM shift assignment dispatched to Firestore: $notificationId")
+                }
+                ?.addOnFailureListener { e ->
+                    Log.w(TAG, "Error storing FCM shift assignment: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore FCM dispatch skipped: ${e.message}")
+        }
+
+        // 2. Persist to local Room database for in-app drawer
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val db = com.example.data.AppDatabase.getInstance(context)
+                db.notificationDao().insertNotification(
+                    NotificationEntity(
+                        notificationId = notificationId,
+                        recipientId = employeeId,
+                        title = title,
+                        message = body,
+                        type = "SHIFT",
+                        timestampUtc = System.currentTimeMillis(),
+                        isRead = false
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to insert local notification entity: ${e.message}")
+            }
+        }
+
+        // 3. Display immediate high-priority Heads-up Notification on device
+        showSystemNotification(
+            context = context,
+            title = title,
+            body = body,
+            notificationId = notificationId.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) },
+            channelId = CHANNEL_ID_SHIFT_SCHEDULE,
+            extraData = mapOf(
+                "notificationId" to notificationId,
+                "type" to "SHIFT_ASSIGNMENT",
+                "employeeId" to employeeId,
+                "projectName" to projectName,
+                "shiftDate" to shiftDate,
+                "shiftTiming" to shiftTiming,
+                "target_screen" to "WORKER_SHIFT"
+            )
+        )
+    }
+
+    /**
+     * Dispatches an automated push notification to the employee when a schedule change or shift adjustment occurs.
+     */
+    fun dispatchScheduleChangeAlert(
+        context: Context,
+        employeeId: String,
+        employeeName: String,
+        projectName: String,
+        shiftDate: String,
+        newTiming: String,
+        oldTiming: String? = null,
+        supervisorName: String,
+        changeReason: String? = null
+    ) {
+        val title = "⚠️ Schedule Change: $shiftDate"
+        val body = "Your schedule at $projectName on $shiftDate was updated to $newTiming by $supervisorName." +
+            (if (!oldTiming.isNullOrBlank()) " (Was: $oldTiming)" else "") +
+            (if (!changeReason.isNullOrBlank()) " Reason: $changeReason" else "")
+        val notificationId = "NOTIF-SCHED-" + UUID.randomUUID().toString().take(8)
+
+        val payload = hashMapOf(
+            "notificationId" to notificationId,
+            "recipientId" to employeeId,
+            "employeeName" to employeeName,
+            "title" to title,
+            "body" to body,
+            "type" to "SCHEDULE_CHANGE",
+            "status" to "MODIFIED",
+            "projectName" to projectName,
+            "shiftDate" to shiftDate,
+            "newTiming" to newTiming,
+            "oldTiming" to (oldTiming ?: ""),
+            "supervisorName" to supervisorName,
+            "changeReason" to (changeReason ?: ""),
+            "timestampUtc" to System.currentTimeMillis(),
+            "fcmTopic" to "employee_${employeeId.lowercase().replace("-", "")}",
+            "priority" to "HIGH",
+            "delivered" to true
+        )
+
+        try {
+            firestore?.collection("fcm_notifications")
+                ?.document(notificationId)
+                ?.set(payload, SetOptions.merge())
+                ?.addOnSuccessListener {
+                    Log.d(TAG, "FCM schedule change dispatched to Firestore: $notificationId")
+                }
+                ?.addOnFailureListener { e ->
+                    Log.w(TAG, "Error storing FCM schedule change: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore FCM dispatch skipped: ${e.message}")
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val db = com.example.data.AppDatabase.getInstance(context)
+                db.notificationDao().insertNotification(
+                    NotificationEntity(
+                        notificationId = notificationId,
+                        recipientId = employeeId,
+                        title = title,
+                        message = body,
+                        type = "SHIFT",
+                        timestampUtc = System.currentTimeMillis(),
+                        isRead = false
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to insert local notification entity: ${e.message}")
+            }
+        }
+
+        showSystemNotification(
+            context = context,
+            title = title,
+            body = body,
+            notificationId = notificationId.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) },
+            channelId = CHANNEL_ID_SHIFT_SCHEDULE,
+            extraData = mapOf(
+                "notificationId" to notificationId,
+                "type" to "SCHEDULE_CHANGE",
+                "employeeId" to employeeId,
+                "projectName" to projectName,
+                "shiftDate" to shiftDate,
+                "newTiming" to newTiming,
+                "target_screen" to "WORKER_SHIFT"
             )
         )
     }

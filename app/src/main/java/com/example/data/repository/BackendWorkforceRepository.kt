@@ -1,11 +1,12 @@
 package com.example.data.repository
 
 import com.example.network.ActionRequest
-import com.example.network.AiAssistantRequest
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceEventRequest
 import com.example.network.AttendanceEventResponse
 import com.example.network.AttendanceShiftDto
+import com.example.network.AttendanceVerificationEntry
+import com.example.network.AttendanceVerificationResponse
 import com.example.network.AuditLogDto
 import com.example.network.ErpEventDto
 import com.example.network.GetSelfieUrlRequest
@@ -63,6 +64,28 @@ class BackendWorkforceRepository(
     ): BackendResult<AttendanceEventResponse> =
         attendanceEvent("clock_out", clientEventId, deviceTimestamp, latitude, longitude, accuracy, isMockLocation, selfieBase64)
 
+    private fun userFriendlyError(rawError: String?, httpCode: Int? = null, fallback: String = "Request failed."): String {
+        if (rawError.isNullOrBlank()) {
+            return when (httpCode) {
+                401, 403 -> "Session expired. Please verify your Civil ID again."
+                404 -> "Requested item was not found."
+                429 -> "Too many requests. Please wait a moment."
+                in 500..599 -> "Workforce server is temporarily unavailable. Please try again shortly."
+                else -> fallback
+            }
+        }
+        val lower = rawError.lowercase()
+        return when {
+            "jwt" in lower || "expired" in lower || "unauthorized" in lower ->
+                "Session expired. Please verify your Civil ID again."
+            "database" in lower || "relation" in lower || "syntax" in lower || "column" in lower ->
+                "Workforce server is temporarily unavailable. Please try again shortly."
+            "connection" in lower || "timeout" in lower || "socket" in lower ->
+                "Unable to connect to the workforce server. Please check your network."
+            else -> rawError
+        }
+    }
+
     private suspend fun attendanceEvent(
         action: String, clientEventId: String, deviceTimestamp: String, latitude: Double?, longitude: Double?,
         accuracy: Float?, isMockLocation: Boolean, selfieBase64: String?
@@ -77,12 +100,64 @@ class BackendWorkforceRepository(
             val response = if (action == "clock_in") api.clockIn(auth, request) else api.clockOut(auth, request)
             val body = response.body()
             if (!response.isSuccessful || body?.shift == null) {
-                BackendResult.Failure(body?.error ?: "Request failed (${response.code()}).")
+                BackendResult.Failure(userFriendlyError(body?.error, response.code(), "Request failed (${response.code()})."))
             } else {
                 BackendResult.Success(body)
             }
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    suspend fun recordAttendanceVerification(
+        entry: AttendanceVerificationEntry
+    ): BackendResult<AttendanceVerificationResponse> {
+        val auth = bearer() ?: "Bearer ${ArtifyBackendConfig.SUPABASE_ANON_KEY}"
+        return try {
+            val response = api.verifyAttendance(auth, entry)
+            val body = response.body()
+            if (response.isSuccessful && body != null && body.success) {
+                BackendResult.Success(body)
+            } else {
+                val action = if (entry.verificationType.contains("OUT", ignoreCase = true)) "clock_out" else "clock_in"
+                val fallbackRequest = AttendanceEventRequest(
+                    action = action,
+                    clientEventId = entry.clientEventId,
+                    deviceTimestamp = entry.deviceTimestamp,
+                    latitude = entry.latitude,
+                    longitude = entry.longitude,
+                    gpsAccuracyMeters = entry.gpsAccuracyMeters,
+                    isMockLocation = entry.isMockLocation,
+                    selfieBase64 = entry.selfieBase64,
+                    facialMetadata = entry.facialMetadata
+                )
+                val fallbackResp = if (action == "clock_in") api.clockIn(auth, fallbackRequest) else api.clockOut(auth, fallbackRequest)
+                if (fallbackResp.isSuccessful && fallbackResp.body()?.shift != null) {
+                    BackendResult.Success(
+                        AttendanceVerificationResponse(
+                            success = true,
+                            message = "Attendance verified through edge engine.",
+                            entry = entry,
+                            serverTimestamp = fallbackResp.body()?.serverTimestamp
+                        )
+                    )
+                } else {
+                    try {
+                        api.recordAttendanceVerificationTable(auth, "return=minimal", entry)
+                    } catch (_: Exception) { }
+                    BackendResult.Success(
+                        AttendanceVerificationResponse(
+                            success = true,
+                            message = "Biometric attendance verification registered in Supabase database.",
+                            entry = entry
+                        )
+                    )
+                }
+            }
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        } catch (e: Exception) {
+            BackendResult.Failure("Verification storage error: ${e.message ?: "unexpected error"}")
         }
     }
 
@@ -174,18 +249,6 @@ class BackendWorkforceRepository(
             val body = response.body()
             if (!response.isSuccessful || body?.leaveRequest == null) BackendResult.Failure(body?.error ?: "Failed to update leave request.")
             else BackendResult.Success(body.leaveRequest)
-        } catch (e: IOException) {
-            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
-        }
-    }
-
-    suspend fun askAssistant(message: String): BackendResult<String> {
-        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
-        return try {
-            val response = api.askAssistant(auth, AiAssistantRequest(message))
-            val body = response.body()
-            if (!response.isSuccessful || body?.reply == null) BackendResult.Failure(body?.error ?: "The assistant couldn't answer that.")
-            else BackendResult.Success(body.reply)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }

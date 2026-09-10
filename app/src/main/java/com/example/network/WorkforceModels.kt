@@ -44,6 +44,57 @@ data class AttendanceShiftDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class FacialMetadataDto(
+    @Json(name = "face_detected") val faceDetected: Boolean = false,
+    @Json(name = "face_count") val faceCount: Int = 0,
+    @Json(name = "confidence") val confidence: Float = 0f,
+    @Json(name = "eyes_distance") val eyesDistance: Float = 0f,
+    @Json(name = "midpoint_x") val midpointX: Float = 0f,
+    @Json(name = "midpoint_y") val midpointY: Float = 0f,
+    @Json(name = "pose_tilt") val poseTilt: Float = 0f,
+    @Json(name = "pose_turn") val poseTurn: Float = 0f,
+    @Json(name = "pose_roll") val poseRoll: Float = 0f,
+    @Json(name = "luminance") val luminance: Double = 0.0,
+    @Json(name = "is_well_lit") val isWellLit: Boolean = true,
+    @Json(name = "is_centered") val isCentered: Boolean = true,
+    @Json(name = "sharpness_score") val sharpnessScore: Double = 0.0,
+    @Json(name = "image_width") val imageWidth: Int = 0,
+    @Json(name = "image_height") val imageHeight: Int = 0,
+    @Json(name = "compliance_status") val complianceStatus: String = "VERIFIED",
+    @Json(name = "compliance_reason") val complianceReason: String = "Face verified within standard parameters"
+)
+
+@JsonClass(generateAdapter = true)
+data class AttendanceVerificationEntry(
+    val id: String,
+    @Json(name = "client_event_id") val clientEventId: String,
+    @Json(name = "employee_id") val employeeId: String,
+    @Json(name = "employee_name") val employeeName: String,
+    @Json(name = "project_id") val projectId: String? = null,
+    @Json(name = "project_name") val projectName: String? = null,
+    @Json(name = "verification_type") val verificationType: String = "SELFIE_VERIFICATION",
+    @Json(name = "device_timestamp") val deviceTimestamp: String,
+    @Json(name = "selfie_base64") val selfieBase64: String? = null,
+    @Json(name = "facial_metadata") val facialMetadata: FacialMetadataDto,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    @Json(name = "gps_accuracy_meters") val gpsAccuracyMeters: Float? = null,
+    @Json(name = "is_mock_location") val isMockLocation: Boolean = false,
+    @Json(name = "verification_status") val verificationStatus: String = "VERIFIED",
+    val notes: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AttendanceVerificationResponse(
+    val success: Boolean = true,
+    val message: String? = null,
+    val entry: AttendanceVerificationEntry? = null,
+    @Json(name = "server_timestamp") val serverTimestamp: String? = null,
+    val error: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class AttendanceEventRequest(
     val action: String,
     @Json(name = "client_event_id") val clientEventId: String,
@@ -52,7 +103,8 @@ data class AttendanceEventRequest(
     val longitude: Double?,
     @Json(name = "gps_accuracy_meters") val gpsAccuracyMeters: Float?,
     @Json(name = "is_mock_location") val isMockLocation: Boolean,
-    @Json(name = "selfie_base64") val selfieBase64: String?
+    @Json(name = "selfie_base64") val selfieBase64: String?,
+    @Json(name = "facial_metadata") val facialMetadata: FacialMetadataDto? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -136,12 +188,6 @@ data class RosterEmployeeDto(
 
 @JsonClass(generateAdapter = true)
 data class RosterResponse(val employees: List<RosterEmployeeDto>? = null, val error: String? = null)
-
-@JsonClass(generateAdapter = true)
-data class AiAssistantRequest(val message: String)
-
-@JsonClass(generateAdapter = true)
-data class AiAssistantResponse(val reply: String? = null, val error: String? = null)
 
 @JsonClass(generateAdapter = true)
 data class ActionRequest(val action: String)

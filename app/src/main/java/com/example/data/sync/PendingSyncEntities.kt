@@ -1,6 +1,7 @@
 package com.example.data.sync
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /** Mirrors the states the master spec requires: PENDING, SYNCING, SYNCED, FAILED. */
@@ -17,7 +18,13 @@ object SyncStatus {
  * to the server on every retry, so a request that actually landed but whose
  * response was lost never becomes a duplicate attendance record.
  */
-@Entity(tableName = "pending_attendance_events")
+@Entity(
+    tableName = "pending_attendance_events",
+    indices = [
+        Index(value = ["employeeId", "syncStatus"]),
+        Index(value = ["queuedAtEpochMs"])
+    ]
+)
 data class PendingAttendanceEventEntity(
     @PrimaryKey val clientEventId: String,
     val employeeId: String,
@@ -37,7 +44,13 @@ data class PendingAttendanceEventEntity(
 )
 
 /** A queued leave submission; [clientRequestId] gives it the same idempotent-retry guarantee. */
-@Entity(tableName = "pending_leave_requests")
+@Entity(
+    tableName = "pending_leave_requests",
+    indices = [
+        Index(value = ["employeeId", "syncStatus"]),
+        Index(value = ["queuedAtEpochMs"])
+    ]
+)
 data class PendingLeaveRequestEntity(
     @PrimaryKey val clientRequestId: String,
     val employeeId: String,

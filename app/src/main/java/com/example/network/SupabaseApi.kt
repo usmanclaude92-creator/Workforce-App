@@ -26,6 +26,16 @@ interface SupabaseApi {
     @POST("attendance")
     suspend fun clockOut(@Header("Authorization") bearerToken: String, @Body request: AttendanceEventRequest): Response<AttendanceEventResponse>
 
+    @POST("attendance-verify")
+    suspend fun verifyAttendance(@Header("Authorization") bearerToken: String, @Body request: AttendanceVerificationEntry): Response<AttendanceVerificationResponse>
+
+    @POST("${ArtifyBackendConfig.SUPABASE_URL}/rest/v1/attendance_verifications")
+    suspend fun recordAttendanceVerificationTable(
+        @Header("Authorization") bearerToken: String,
+        @Header("Prefer") prefer: String = "return=minimal",
+        @Body request: AttendanceVerificationEntry
+    ): Response<Unit>
+
     @POST("attendance")
     suspend fun myShifts(@Header("Authorization") bearerToken: String, @Body request: MyShiftsRequest): Response<MyShiftsResponse>
 
@@ -52,9 +62,6 @@ interface SupabaseApi {
 
     @POST("supervisor")
     suspend fun attendanceRoster(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<PendingAttendanceResponse>
-
-    @POST("ai-assistant")
-    suspend fun askAssistant(@Header("Authorization") bearerToken: String, @Body request: AiAssistantRequest): Response<AiAssistantResponse>
 
     @POST("attendance")
     suspend fun myNotifications(@Header("Authorization") bearerToken: String, @Body request: ActionRequest): Response<MyNotificationsResponse>

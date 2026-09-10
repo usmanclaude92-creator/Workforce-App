@@ -48,6 +48,10 @@ fun SupervisorDashboardScreen(
     val uiState by supervisorViewModel.uiState.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) } // 0=Approvals, 1=Roster, 2=Leave, 3=Sites, 4=Audit&ERP
 
+    val isDark = LocalIsDarkTheme.current
+    val screenBg = if (isDark) SophisticatedDarkBg else SophisticatedLightBg
+    val navBg = if (isDark) SophisticatedDarkNav else SophisticatedLightNav
+
     var showRejectDialogForAttendance by remember { mutableStateOf<String?>(null) }
     var showRejectDialogForLeave by remember { mutableStateOf<String?>(null) }
     var approveComment by remember { mutableStateOf("") }
@@ -68,9 +72,9 @@ fun SupervisorDashboardScreen(
         },
         bottomBar = {
             NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = navBg,
                 contentColor = MaterialTheme.colorScheme.primary,
-                tonalElevation = 3.dp
+                tonalElevation = 0.dp
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
@@ -173,7 +177,7 @@ fun SupervisorDashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(SophisticatedDarkBg)
+                .background(screenBg)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Supervisor Metrics Overview Bar
@@ -328,10 +332,13 @@ fun SupervisorDashboardScreen(
 
 @Composable
 private fun SupervisorMetricsBar(metrics: com.example.ui.viewmodel.SupervisorMetrics) {
+    val isDark = LocalIsDarkTheme.current
+    val barSurface = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val barBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SophisticatedDarkSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, SophisticatedDarkBorder)
+        color = barSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, barBorder)
     ) {
         Row(
             modifier = Modifier
@@ -351,6 +358,8 @@ private fun SupervisorMetricsBar(metrics: com.example.ui.viewmodel.SupervisorMet
 
 @Composable
 private fun MetricChip(label: String, count: Int, color: Color) {
+    val isDark = LocalIsDarkTheme.current
+    val labelColor = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = count.toString(),
@@ -360,7 +369,7 @@ private fun MetricChip(label: String, count: Int, color: Color) {
         )
         Text(
             text = label,
-            color = SophisticatedTextSecondary,
+            color = labelColor,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium
         )
@@ -374,6 +383,12 @@ private fun PendingApprovalsView(
     onApprove: (AttendanceEntity) -> Unit,
     onReject: (AttendanceEntity) -> Unit
 ) {
+    val isDark = LocalIsDarkTheme.current
+    val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+    val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -383,12 +398,12 @@ private fun PendingApprovalsView(
             text = "Pending Attendance Submissions (${pendingList.size})",
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
-            color = SophisticatedTextPrimary
+            color = textPrimary
         )
         Text(
             text = "Review selfie biometric evidence & verified server timestamps",
             fontSize = 12.sp,
-            color = SophisticatedTextSecondary
+            color = textSecondary
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -398,7 +413,7 @@ private fun PendingApprovalsView(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.TaskAlt, contentDescription = null, tint = SophisticatedSuccess, modifier = Modifier.size(52.dp))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("All pending attendances have been reviewed!", color = SophisticatedTextPrimary, fontWeight = FontWeight.Bold)
+                    Text("All pending attendances have been reviewed!", color = textPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         } else {
@@ -409,8 +424,8 @@ private fun PendingApprovalsView(
                             .fillMaxWidth()
                             .testTag("pending_item_${item.attendanceId}"),
                         shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = SophisticatedDarkSurface),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, SophisticatedDarkBorder)
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, cardBorder)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(
@@ -423,11 +438,11 @@ private fun PendingApprovalsView(
                                         text = item.employeeName,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp,
-                                        color = SophisticatedTextPrimary
+                                        color = textPrimary
                                     )
                                     Text(
                                         text = "ID: ${item.employeeId} • ${item.employeeRole}",
-                                        color = SophisticatedTextMuted,
+                                        color = textSecondary,
                                         fontSize = 12.sp
                                     )
                                 }

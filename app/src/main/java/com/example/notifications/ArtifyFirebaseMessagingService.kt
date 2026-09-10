@@ -45,8 +45,21 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
             data["fcmTopic"] == "all_supervisors" ||
             title?.contains("Leave Request", ignoreCase = true) == true
 
+        val isShiftOrScheduleAlert = type == "SHIFT_ASSIGNMENT" ||
+            type == "SCHEDULE_CHANGE" ||
+            type == "SHIFT" ||
+            remoteMessage.from?.contains("shifts_schedules") == true ||
+            data["fcmTopic"]?.contains("shifts_schedules") == true ||
+            title?.contains("Shift", ignoreCase = true) == true ||
+            title?.contains("Schedule", ignoreCase = true) == true
+
         if (title.isNullOrBlank()) {
-            title = if (isSupervisorLeaveAlert) "🔔 New Leave Request" else "Workforce Update"
+            title = when {
+                isSupervisorLeaveAlert -> "🔔 New Leave Request"
+                type == "SCHEDULE_CHANGE" -> "⚠️ Schedule Change Alert"
+                isShiftOrScheduleAlert -> "📅 New Shift Assignment"
+                else -> "Workforce Update"
+            }
         }
         if (body.isNullOrBlank()) {
             body = "You have an updated workforce notification."
@@ -57,6 +70,12 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
 
         // 2. Persist to Room local database so it displays in notification drawer / badge counters
         val recipientId = data["recipientId"] ?: (if (isSupervisorLeaveAlert) "ALL_SUPERVISORS" else data["employeeId"] ?: "ALL")
+        val localType = when {
+            isSupervisorLeaveAlert -> "LEAVE"
+            isShiftOrScheduleAlert -> "SHIFT"
+            else -> type
+        }
+
         serviceScope.launch {
             try {
                 val db = AppDatabase.getInstance(applicationContext)
@@ -68,12 +87,12 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
                         recipientId = recipientId,
                         title = title ?: "Notification",
                         message = body ?: "",
-                        type = type,
+                        type = localType,
                         timestampUtc = System.currentTimeMillis(),
                         isRead = false
                     )
                 )
-                Log.d(TAG, "Saved FCM notification into local Room DB (Recipient: $recipientId, Type: $type)")
+                Log.d(TAG, "Saved FCM notification into local Room DB (Recipient: $recipientId, Type: $localType)")
 
                 // If this is a new leave request payload containing complete leave fields, warm the local Leave cache
                 if (isSupervisorLeaveAlert && !data["requestId"].isNullOrBlank() && !data["employeeId"].isNullOrBlank()) {
@@ -103,16 +122,18 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
             }
         }
 
-        // 3. Select appropriate notification channel (High-priority supervisor channel vs standard workforce channel)
-        val channelId = if (isSupervisorLeaveAlert) {
-            FcmNotificationManager.CHANNEL_ID_SUPERVISOR_ALERTS
-        } else {
-            FcmNotificationManager.CHANNEL_ID_WORKFORCE
+        // 3. Select appropriate notification channel (Supervisor alerts, Shift/Schedule alerts, or standard workforce)
+        val channelId = when {
+            isSupervisorLeaveAlert -> FcmNotificationManager.CHANNEL_ID_SUPERVISOR_ALERTS
+            isShiftOrScheduleAlert -> FcmNotificationManager.CHANNEL_ID_SHIFT_SCHEDULE
+            else -> FcmNotificationManager.CHANNEL_ID_WORKFORCE
         }
 
         val enrichedData = HashMap(data).apply {
             if (isSupervisorLeaveAlert && !containsKey("target_screen")) {
                 put("target_screen", "SUPERVISOR_LEAVE")
+            } else if (isShiftOrScheduleAlert && !containsKey("target_screen")) {
+                put("target_screen", "WORKER_SHIFT")
             }
         }
 

@@ -149,6 +149,7 @@ class RealSyncManager(
             is BackendResult.Success -> {
                 dao.updateAttendanceEvent(item.copy(syncStatus = SyncStatus.SYNCED, syncedAtEpochMs = System.currentTimeMillis(), lastError = null))
                 item.selfieLocalPath?.let { runCatching { File(it).delete() } }
+                uploadAttendanceEventToFirestore(item)
                 true
             }
             is BackendResult.Failure -> {
@@ -200,11 +201,36 @@ class RealSyncManager(
         }
     }
 
-    private suspend fun encodeSelfieFile(path: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun encodeSelfieFile(path: String): String? {
+        return com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(path)
+    }
+
+    private fun uploadAttendanceEventToFirestore(item: PendingAttendanceEventEntity) {
         try {
-            Base64.encodeToString(File(path).readBytes(), Base64.NO_WRAP)
+            val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val isClockIn = item.action == "clock_in"
+            val actionCollection = if (isClockIn) "clock_ins" else "clock_outs"
+            val payload = mapOf(
+                "eventId" to item.clientEventId,
+                "attendanceId" to item.clientEventId,
+                "employeeId" to item.employeeId,
+                "action" to item.action,
+                "recordType" to if (isClockIn) "CHECK_IN" else "CHECK_OUT",
+                "deviceTimestamp" to item.deviceTimestamp,
+                "latitude" to item.latitude,
+                "longitude" to item.longitude,
+                "gpsAccuracyMeters" to item.gpsAccuracyMeters,
+                "isMockLocation" to item.isMockLocation,
+                "queuedAtEpochMs" to item.queuedAtEpochMs,
+                "syncedAtEpochMs" to System.currentTimeMillis(),
+                "syncSource" to "ROOM_REAL_SYNC_V2"
+            )
+            firestore.collection("attendance_records").document(item.clientEventId)
+                .set(payload, com.google.firebase.firestore.SetOptions.merge())
+            firestore.collection(actionCollection).document(item.clientEventId)
+                .set(payload, com.google.firebase.firestore.SetOptions.merge())
         } catch (e: Exception) {
-            null
+            // Non-blocking firestore sync mirror
         }
     }
 }
