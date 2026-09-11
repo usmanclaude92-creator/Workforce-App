@@ -16,6 +16,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -812,6 +814,7 @@ private fun MiniStatCard(title: String, value: String, subtext: String, icon: an
 
 // ---------------- Daily Logs tab (search/filter/detail) ----------------
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewModel) {
     var query by remember { mutableStateOf("") }
@@ -847,14 +850,21 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         }
     )
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // Supabase Database Connection Status Banner
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh,
-            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
-        ) {
+    PullToRefreshBox(
+        isRefreshing = uiState.isLoading,
+        onRefresh = { viewModel.refresh() },
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("swipe_to_refresh_shifts")
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            // Supabase Database Connection Status Banner
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh,
+                border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -955,8 +965,20 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         Spacer(modifier = Modifier.height(8.dp))
 
         if (filtered.isEmpty()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No records match.", fontSize = 12.sp, color = textMuted, modifier = Modifier.padding(top = 20.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No records match.\nPull down to refresh shift logs from Supabase.",
+                    fontSize = 12.sp,
+                    color = textMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 32.dp)
+                )
             }
         } else {
             LazyColumn(
@@ -1075,6 +1097,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                 }
             }
         }
+    }
     }
 
     selected?.let { shift ->

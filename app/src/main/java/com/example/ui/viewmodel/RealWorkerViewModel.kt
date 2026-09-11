@@ -210,14 +210,14 @@ class RealWorkerViewModel(
                     if (result.isNetworkError) offlineCache.getCachedNotifications(employeeId)?.let { _uiState.value = _uiState.value.copy(notifications = it) }
                 }
             }
-            if (_uiState.value.profile == null) {
-                when (val result = repository.myProfile()) {
-                    is BackendResult.Success -> {
-                        offlineCache.cacheProfile(employeeId, result.value)
-                        _uiState.value = _uiState.value.copy(profile = result.value)
-                    }
-                    is BackendResult.Failure -> {
-                        if (result.isNetworkError) offlineCache.getCachedProfile(employeeId)?.let { _uiState.value = _uiState.value.copy(profile = it) }
+            when (val result = repository.myProfile()) {
+                is BackendResult.Success -> {
+                    offlineCache.cacheProfile(employeeId, result.value)
+                    _uiState.value = _uiState.value.copy(profile = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError && _uiState.value.profile == null) {
+                        offlineCache.getCachedProfile(employeeId)?.let { _uiState.value = _uiState.value.copy(profile = it) }
                     }
                 }
             }

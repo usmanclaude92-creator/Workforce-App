@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import com.example.data.repository.WorkforceRepository
 import com.example.model.AttendanceState
 import com.example.ui.theme.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -65,6 +67,8 @@ fun DailyAttendanceLogsScreen(
     var selectedFilter by remember { mutableStateOf(AttendanceFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedRecordForDetail by remember { mutableStateOf<AttendanceEntity?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    var isRefreshing by remember { mutableStateOf(false) }
 
     // Computed filtered list sorted latest attendance first
     val filteredLogs = remember(attendanceLogs, selectedFilter, searchQuery) {
@@ -172,14 +176,28 @@ fun DailyAttendanceLogsScreen(
         },
         containerColor = SophisticatedDarkBg
     ) { innerPadding ->
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                coroutineScope.launch {
+                    isRefreshing = true
+                    repository.syncPendingClockIns()
+                    kotlinx.coroutines.delay(600)
+                    isRefreshing = false
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp)
-                .testTag("daily_attendance_logs_list"),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .testTag("swipe_to_refresh_shifts")
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+                    .testTag("daily_attendance_logs_list"),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
             item { Spacer(modifier = Modifier.height(6.dp)) }
 
             // Supabase Cloud & Room Database Connection Card
@@ -413,6 +431,7 @@ fun DailyAttendanceLogsScreen(
             }
 
             item { Spacer(modifier = Modifier.height(30.dp)) }
+        }
         }
     }
 
