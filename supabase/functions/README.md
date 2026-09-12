@@ -6,11 +6,13 @@ review instead of being edited only in the Supabase dashboard.
 
 ## What changed here vs. what is currently deployed (2026-09-12)
 
-All five were rewritten to close an authentication bypass discovered in audit. **None of
-these five have been deployed yet** — the automated session that drafted them was blocked
-from deploying by a platform-level production-safety control (deploys to a live project
-require a human to run them). They exist only as the files in this directory until someone
-runs the commands below. Until then, the live functions still have every bug described.
+All five were rewritten to close an authentication bypass discovered in audit.
+**Four of the five are now deployed to production**: `pin-login` (v4), `civil-id-register`
+(v10), `attendance` (v17), `refresh-session` (v3). Only **`sync-eligibility` remains
+undeployed**, held back deliberately — it needs `WORKFORCE_INTEGRATION_SECRET` set as a
+Supabase Edge Function secret first (no tool access to set Edge Function secrets from this
+session), and deploying it without that secret configured would also break hcm's own
+legitimate calls.
 
 - **`pin-login`** — previously checked only that a PIN was *present*, never that it matched
   the employee's stored hash. Any employee/civil ID plus any non-empty PIN returned a
@@ -43,19 +45,14 @@ runs the commands below. Until then, the live functions still have every bug des
 
 ## Deploying
 
+`pin-login`, `civil-id-register`, `attendance` and `refresh-session` are already deployed
+(versions 4, 10, 17, 3). Only `sync-eligibility` is still outstanding:
+
 ```bash
 supabase login
 supabase link --project-ref jpsiafvbyupofnbqonkq
-supabase functions deploy pin-login
-supabase functions deploy civil-id-register
-supabase functions deploy attendance
-supabase functions deploy refresh-session
 supabase functions deploy sync-eligibility      # set the secret first (below), or this starts rejecting hcm's calls too
 ```
-
-`pin-login` and `attendance` are the most urgent of the five — they're the ones that
-currently let an unauthenticated or wrongly-authenticated caller act as an arbitrary
-employee.
 
 `sync-eligibility` will reject every call (including hcm's legitimate ones) until a
 matching secret exists on both sides:
@@ -74,10 +71,11 @@ source) — pick a fresh one.
 - `register_workforce_staff` — a SECURITY DEFINER Postgres function directly callable by
   `anon`/`authenticated` over PostgREST RPC, bypassing all of the above entirely (caller
   supplies their own `pin_hash`). `hcm`'s `db/migrations/005_revoke_dangerous_anon_execute.sql`
-  revokes `EXECUTE` on it and on `rls_auto_enable()`. **Not yet applied to production** —
-  blocked the same way as the function deploys above; apply it manually (see that file).
-- 18 functions have a mutable `search_path` (standard Postgres hardening item, migration
-  `006_function_search_path_hardening.sql`) — same status, not yet applied.
+  revokes `EXECUTE` on it and on `rls_auto_enable()`. **Applied to production 2026-09-12** —
+  verified: only `postgres`/`service_role` remain as grantees.
+- 18 functions had a mutable `search_path` (standard Postgres hardening item, migration
+  `006_function_search_path_hardening.sql`). **Applied to production 2026-09-12** — verified
+  via the security advisor, which no longer flags `function_search_path_mutable`.
 - The HMAC request-signing scheme (`CryptoRequestSigner` in the Android app) is not
   verified by any of these functions. It was also, until this pass, never actually
   triggered (see `ApiClient.kt`'s fixed path-matching) — treat both the signing and its
