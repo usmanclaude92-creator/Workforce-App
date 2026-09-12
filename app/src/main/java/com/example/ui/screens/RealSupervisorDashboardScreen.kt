@@ -670,7 +670,7 @@ private fun AttendanceApprovalCard(
                 fontSize = 13.sp
             )
             Text(
-                text = "Shift Duration: ${shift.totalWorkedMinutes ?: 0} mins (${formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—"} to ${formatShiftTime(shift.clockOut?.serverTimestamp) ?: "—"})",
+                text = "Shift Duration: ${formatShiftDurationHrsMins(shift.totalWorkedMinutes)} (${formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—"} to ${formatShiftTime(shift.clockOut?.serverTimestamp) ?: "—"})",
                 color = textSecondary,
                 fontSize = 12.sp
             )
@@ -891,10 +891,10 @@ private fun InspectAttendanceDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                InspectRow("Shift Date", shift.shiftDate)
+                InspectRow("Shift Date", formatDisplayDateDDMMYYYY(shift.shiftDate))
                 InspectRow("Clock In", formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—")
                 InspectRow("Clock Out", formatShiftTime(shift.clockOut?.serverTimestamp) ?: "In progress")
-                InspectRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
+                InspectRow("Duration", formatShiftDurationHrsMins(shift.totalWorkedMinutes))
                 InspectRow("Compliance", shift.complianceFlag.replace('_', ' '))
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -1069,7 +1069,7 @@ private fun LeaveApprovalCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Period: ${leave.startDate} to ${leave.endDate} (${leave.totalDays.toInt()} days)",
+                text = "Period: ${formatDisplayDateDDMMYYYY(leave.startDate)} to ${formatDisplayDateDDMMYYYY(leave.endDate)} (${leave.totalDays.toInt()} days)",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = textPrimary

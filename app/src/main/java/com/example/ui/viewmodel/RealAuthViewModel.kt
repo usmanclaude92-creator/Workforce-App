@@ -110,9 +110,20 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
         }
     }
 
+    fun enterDemoMode(employee: BackendEmployee) {
+        _uiState.value = _uiState.value.copy(
+            isLoading = false,
+            errorMessage = null,
+            screen = RealAuthScreenState.SIGNED_IN,
+            signedInEmployee = employee.copy(isDemo = true)
+        )
+    }
+
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
+            if (_uiState.value.signedInEmployee?.isDemo != true) {
+                repository.logout()
+            }
             _uiState.value = RealAuthUiState(screen = RealAuthScreenState.CIVIL_ID_REGISTER)
         }
     }

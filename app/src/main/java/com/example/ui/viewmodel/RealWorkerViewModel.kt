@@ -4,7 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
-import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.IWorkforceRepository
 import com.example.data.repository.SupabaseStorageService
 import com.example.data.sync.OfflineCache
 import com.example.data.sync.RealSyncManager
@@ -52,7 +52,7 @@ data class RealWorkerUiState(
 
 /** Drives the real (backend-authenticated) worker attendance/leave flow, with offline queueing. */
 class RealWorkerViewModel(
-    private val repository: BackendWorkforceRepository,
+    private val repository: IWorkforceRepository,
     private val locationHelper: LocationHelper,
     private val syncManager: RealSyncManager,
     private val offlineCache: OfflineCache,
@@ -130,6 +130,7 @@ class RealWorkerViewModel(
                                     it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
                                 }.thenByDescending { it.shiftDate }
                             )
+                            .take(30)
                         val serverLogs = history.map { shift ->
                             ShiftCompletionLog(
                                 logId = "LOG-${shift.id.takeLast(8)}",
@@ -174,6 +175,7 @@ class RealWorkerViewModel(
                                         it.clockIn?.serverTimestamp ?: it.clockOut?.serverTimestamp ?: (it.shiftDate + "T00:00:00")
                                     }.thenByDescending { it.shiftDate }
                                 )
+                                .take(30)
                             _uiState.value = _uiState.value.copy(
                                 activeShift = active,
                                 shiftHistory = history,

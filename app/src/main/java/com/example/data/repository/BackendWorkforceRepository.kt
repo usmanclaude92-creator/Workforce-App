@@ -43,7 +43,7 @@ sealed class BackendResult<out T> {
 class BackendWorkforceRepository(
     private val authRepository: BackendAuthRepository,
     private val sessionStore: SecureSessionStore
-) {
+) : IWorkforceRepository {
     private val api = ArtifyBackendConfig.api
 
     private suspend fun bearer(): String? {
@@ -52,13 +52,13 @@ class BackendWorkforceRepository(
         return "Bearer $token"
     }
 
-    suspend fun clockIn(
+    override suspend fun clockIn(
         clientEventId: String, deviceTimestamp: String, latitude: Double?, longitude: Double?,
         accuracy: Float?, isMockLocation: Boolean, selfieBase64: String?
     ): BackendResult<AttendanceEventResponse> =
         attendanceEvent("clock_in", clientEventId, deviceTimestamp, latitude, longitude, accuracy, isMockLocation, selfieBase64)
 
-    suspend fun clockOut(
+    override suspend fun clockOut(
         clientEventId: String, deviceTimestamp: String, latitude: Double?, longitude: Double?,
         accuracy: Float?, isMockLocation: Boolean, selfieBase64: String?
     ): BackendResult<AttendanceEventResponse> =
@@ -109,7 +109,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun recordAttendanceVerification(
+    override suspend fun recordAttendanceVerification(
         entry: AttendanceVerificationEntry
     ): BackendResult<AttendanceVerificationResponse> {
         val auth = bearer() ?: "Bearer ${ArtifyBackendConfig.SUPABASE_ANON_KEY}"
@@ -161,7 +161,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun myShifts(): BackendResult<List<AttendanceShiftDto>> {
+    override suspend fun myShifts(): BackendResult<List<AttendanceShiftDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.myShifts(auth, MyShiftsRequest())
@@ -173,7 +173,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun submitLeave(clientRequestId: String, leaveType: String, startDate: String, endDate: String, reason: String): BackendResult<LeaveRequestDto> {
+    override suspend fun submitLeave(clientRequestId: String, leaveType: String, startDate: String, endDate: String, reason: String): BackendResult<LeaveRequestDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.submitLeave(
@@ -188,7 +188,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun myLeaveRequests(): BackendResult<List<LeaveRequestDto>> {
+    override suspend fun myLeaveRequests(): BackendResult<List<LeaveRequestDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.myLeaveRequests(auth, MyLeaveRequestsRequest())
@@ -200,7 +200,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun pendingAttendance(): BackendResult<List<AttendanceShiftDto>> {
+    override suspend fun pendingAttendance(): BackendResult<List<AttendanceShiftDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.pendingAttendance(auth, SupervisorActionRequest(action = "pending_attendance"))
@@ -212,7 +212,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun reviewAttendance(shiftId: String, approve: Boolean, comment: String?): BackendResult<AttendanceShiftDto> {
+    override suspend fun reviewAttendance(shiftId: String, approve: Boolean, comment: String?): BackendResult<AttendanceShiftDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.reviewAttendance(
@@ -227,7 +227,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun pendingLeave(): BackendResult<List<LeaveRequestDto>> {
+    override suspend fun pendingLeave(): BackendResult<List<LeaveRequestDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.pendingLeave(auth, SupervisorActionRequest(action = "pending_leave"))
@@ -239,7 +239,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun reviewLeave(leaveId: String, approve: Boolean, comment: String?): BackendResult<LeaveRequestDto> {
+    override suspend fun reviewLeave(leaveId: String, approve: Boolean, comment: String?): BackendResult<LeaveRequestDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.reviewLeave(
@@ -254,7 +254,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun myNotifications(): BackendResult<List<NotificationDto>> {
+    override suspend fun myNotifications(): BackendResult<List<NotificationDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.myNotifications(auth, ActionRequest("my_notifications"))
@@ -266,19 +266,67 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun myProfile(): BackendResult<ProfileDto> {
-        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+    override suspend fun myProfile(): BackendResult<ProfileDto> {
+        val cachedEmp = sessionStore.cachedEmployee()
+        val auth = bearer() ?: run {
+            return if (cachedEmp != null) {
+                BackendResult.Success(
+                    ProfileDto(
+                        fullName = cachedEmp.fullName,
+                        employeeCode = cachedEmp.employeeCode,
+                        role = cachedEmp.role,
+                        department = "Operations & Projects",
+                        companyName = "Artify HCMS Workforce",
+                        isDemo = cachedEmp.isDemo,
+                        projectName = "Assigned Site"
+                    )
+                )
+            } else {
+                BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+            }
+        }
         return try {
             val response = api.myProfile(auth, ActionRequest("my_profile"))
             val body = response.body()
-            if (!response.isSuccessful || body?.profile == null) BackendResult.Failure(body?.error ?: "Failed to load profile.")
-            else BackendResult.Success(body.profile)
+            if (!response.isSuccessful || body?.profile == null) {
+                if (cachedEmp != null) {
+                    BackendResult.Success(
+                        ProfileDto(
+                            fullName = cachedEmp.fullName,
+                            employeeCode = cachedEmp.employeeCode,
+                            role = cachedEmp.role,
+                            department = "Operations & Projects",
+                            companyName = "Artify HCMS Workforce",
+                            isDemo = cachedEmp.isDemo,
+                            projectName = "Assigned Site"
+                        )
+                    )
+                } else {
+                    BackendResult.Failure(body?.error ?: "Failed to load profile.")
+                }
+            } else {
+                BackendResult.Success(body.profile)
+            }
         } catch (e: IOException) {
-            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+            if (cachedEmp != null) {
+                BackendResult.Success(
+                    ProfileDto(
+                        fullName = cachedEmp.fullName,
+                        employeeCode = cachedEmp.employeeCode,
+                        role = cachedEmp.role,
+                        department = "Operations & Projects",
+                        companyName = "Artify HCMS Workforce",
+                        isDemo = cachedEmp.isDemo,
+                        projectName = "Assigned Site"
+                    )
+                )
+            } else {
+                BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+            }
         }
     }
 
-    suspend fun getMySelfieUrl(storagePath: String): BackendResult<String> {
+    override suspend fun getMySelfieUrl(storagePath: String): BackendResult<String> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.getMySelfieUrl(auth, GetSelfieUrlRequest(storagePath = storagePath))
@@ -290,7 +338,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun getTeamSelfieUrl(storagePath: String): BackendResult<String> {
+    override suspend fun getTeamSelfieUrl(storagePath: String): BackendResult<String> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.getTeamSelfieUrl(auth, GetSelfieUrlRequest(storagePath = storagePath))
@@ -302,7 +350,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun sites(): BackendResult<List<SiteDto>> {
+    override suspend fun sites(): BackendResult<List<SiteDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.sites(auth, SupervisorActionRequest(action = "sites"))
@@ -314,7 +362,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun auditLog(): BackendResult<List<AuditLogDto>> {
+    override suspend fun auditLog(): BackendResult<List<AuditLogDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.auditLog(auth, SupervisorActionRequest(action = "audit_log"))
@@ -326,7 +374,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun erpOutbox(): BackendResult<List<ErpEventDto>> {
+    override suspend fun erpOutbox(): BackendResult<List<ErpEventDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.erpOutbox(auth, SupervisorActionRequest(action = "erp_outbox"))
@@ -338,7 +386,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun supervisorMetrics(): BackendResult<SupervisorMetricsDto> {
+    override suspend fun supervisorMetrics(): BackendResult<SupervisorMetricsDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.supervisorMetrics(auth, SupervisorActionRequest(action = "metrics"))
@@ -350,7 +398,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun roster(): BackendResult<List<RosterEmployeeDto>> {
+    override suspend fun roster(): BackendResult<List<RosterEmployeeDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.roster(auth, SupervisorActionRequest(action = "roster"))
@@ -362,7 +410,7 @@ class BackendWorkforceRepository(
         }
     }
 
-    suspend fun attendanceRoster(): BackendResult<List<AttendanceShiftDto>> {
+    override suspend fun attendanceRoster(): BackendResult<List<AttendanceShiftDto>> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
             val response = api.attendanceRoster(auth, SupervisorActionRequest(action = "attendance_roster"))

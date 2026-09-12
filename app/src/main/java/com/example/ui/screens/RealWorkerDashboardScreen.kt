@@ -660,12 +660,12 @@ private fun ShiftHistoryCard(shift: AttendanceShiftDto) {
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(shift.shiftDate, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
+                    Text(formatDisplayDateDDMMYYYY(shift.shiftDate), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
                 }
                 ShiftStatusBadge(shift.status)
             }
             Spacer(modifier = Modifier.height(6.dp))
-            Text("Worked: ${shift.totalWorkedMinutes ?: 0} mins", fontSize = 12.sp, color = textSecondary)
+            Text("Worked: ${formatShiftDurationHrsMins(shift.totalWorkedMinutes)}", fontSize = 12.sp, color = textSecondary)
             shift.reviewComment?.let {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text("Supervisor: $it", fontSize = 11.sp, color = textMuted)
@@ -764,6 +764,38 @@ private fun formatShiftTime(iso: String?): String? {
     }
 }
 
+/** Always calculate shifts duration in Hrs and Mins format (e.g. "2 Hrs 15 Mins" or "45 Mins") */
+fun formatShiftDurationHrsMins(minutes: Int?): String {
+    val mins = (minutes ?: 0).coerceAtLeast(0)
+    val hrs = mins / 60
+    val remMins = mins % 60
+    return if (hrs > 0) "${hrs} Hrs ${remMins} Mins" else "${remMins} Mins"
+}
+
+/** Set the date format DD-MM-YYYY */
+fun formatDisplayDateDDMMYYYY(dateStr: String?): String {
+    if (dateStr.isNullOrBlank()) return "—"
+    val trimmed = dateStr.trim()
+    if (Regex("""^\d{2}-\d{2}-\d{4}$""").matches(trimmed)) return trimmed
+    return try {
+        val parsed = java.time.LocalDate.parse(trimmed)
+        java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy").format(parsed)
+    } catch (_: Exception) {
+        try {
+            val parsed = java.time.OffsetDateTime.parse(trimmed)
+            java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy").format(parsed)
+        } catch (_: Exception) {
+            try {
+                val parsed = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(trimmed)
+                if (parsed != null) java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).format(parsed)
+                else trimmed
+            } catch (_: Exception) {
+                trimmed
+            }
+        }
+    }
+}
+
 /** Extracts epoch milliseconds from a shift's clockIn or clockOut timestamp, falling back to shiftDate. */
 private fun parseShiftInstantMs(shift: AttendanceShiftDto): Long {
     val raw = shift.clockIn?.serverTimestamp ?: shift.clockOut?.serverTimestamp
@@ -830,25 +862,28 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
 
     val activeList = listOfNotNull(uiState.activeShift?.takeIf { !it.id.startsWith(com.example.ui.viewmodel.LOCAL_PENDING_SHIFT_PREFIX) })
     val allShifts = (activeList + uiState.shiftHistory).distinctBy { it.id }
+        .sortedWith(
+            compareByDescending<AttendanceShiftDto> {
+                // Active shift in-progress always at the top of daily logs
+                if (it.status == "OPEN") 1 else 0
+            }.thenByDescending {
+                // Latest clock-in or clock-out timestamp first
+                parseShiftInstantMs(it)
+            }.thenByDescending {
+                it.shiftDate
+            }
+        )
+        .take(30)
     val filtered = allShifts.filter { s ->
         val matchesFilter = when (filter) {
             "ALL" -> true
             "COMPLETED" -> s.status != "OPEN"
             else -> s.status == filter
         }
-        val matchesQuery = query.isBlank() || s.shiftDate.contains(query, ignoreCase = true) || s.status.contains(query, ignoreCase = true)
+        val formattedDate = formatDisplayDateDDMMYYYY(s.shiftDate)
+        val matchesQuery = query.isBlank() || s.shiftDate.contains(query, ignoreCase = true) || formattedDate.contains(query, ignoreCase = true) || s.status.contains(query, ignoreCase = true)
         matchesFilter && matchesQuery
-    }.sortedWith(
-        compareByDescending<AttendanceShiftDto> {
-            // Active shift in-progress always at the top of daily logs
-            if (it.status == "OPEN") 1 else 0
-        }.thenByDescending {
-            // Latest clock-in or clock-out timestamp first
-            parseShiftInstantMs(it)
-        }.thenByDescending {
-            it.shiftDate
-        }
-    )
+    }
 
     PullToRefreshBox(
         isRefreshing = uiState.isLoading,
@@ -919,7 +954,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
-            placeholder = { Text("Search by date (YYYY-MM-DD), project, or time…", fontSize = 11.5.sp, color = textMuted) },
+            placeholder = { Text("Search by date (DD-MM-YYYY), project, or time…", fontSize = 11.5.sp, color = textMuted) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SophisticatedPrimary) },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -959,7 +994,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("MY SHIFTS SUMMARY (${filtered.size})", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
+            Text("LAST 30 ATTENDANCES (${filtered.size}) • LATEST TO OLDEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
             Text("Supabase Cloud DB & Room DB", fontSize = 9.5.sp, color = textMuted)
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -1006,7 +1041,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
-                                        Text(shift.shiftDate, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
+                                        Text(formatDisplayDateDDMMYYYY(shift.shiftDate), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
                                         Text(shift.project?.name ?: "—", fontSize = 11.sp, color = textSecondary)
                                     }
                                 }
@@ -1040,7 +1075,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                     Box(modifier = Modifier.width(1.dp).height(26.dp).background(cardBorder))
                                     Column(modifier = Modifier.weight(1f).padding(start = 10.dp), horizontalAlignment = Alignment.End) {
                                         Text("DURATION", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = textMuted)
-                                        Text("${shift.totalWorkedMinutes ?: 0}m", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SophisticatedPrimary)
+                                        Text(formatShiftDurationHrsMins(shift.totalWorkedMinutes), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SophisticatedPrimary)
                                     }
                                 }
                             }
@@ -1144,11 +1179,11 @@ private fun AttendanceDetailDialog(shift: AttendanceShiftDto, uiState: RealWorke
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                KeyValueRow("Date", shift.shiftDate)
+                KeyValueRow("Date", formatDisplayDateDDMMYYYY(shift.shiftDate))
                 KeyValueRow("Site", shift.project?.name ?: "—")
                 KeyValueRow("Clock In", formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—")
                 KeyValueRow("Clock Out", formatShiftTime(shift.clockOut?.serverTimestamp) ?: "In progress")
-                KeyValueRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
+                KeyValueRow("Duration", formatShiftDurationHrsMins(shift.totalWorkedMinutes))
                 KeyValueRow("Biometric Match", if (selfiePath != null) "Selfie captured & verified" else "No selfie on record")
                 KeyValueRow("Hardware Device", (shift.clockIn?.deviceId ?: shift.clockOut?.deviceId)?.take(18) ?: "Unknown")
                 KeyValueRow("Database Storage", "Supabase Database & Local Room DB")
@@ -1390,8 +1425,8 @@ private fun LeaveForm(isSubmitting: Boolean, onCancel: () -> Unit, onSubmit: (ty
         Text("DATE RANGE", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = SophisticatedPrimary)
         Spacer(modifier = Modifier.height(6.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            DateField("Start", start, modifier = Modifier.weight(1f)) { showDatePickerFor = "start" }
-            DateField("End", end, modifier = Modifier.weight(1f)) { showDatePickerFor = "end" }
+            DateField("Start", formatDisplayDateDDMMYYYY(start), modifier = Modifier.weight(1f)) { showDatePickerFor = "start" }
+            DateField("End", formatDisplayDateDDMMYYYY(end), modifier = Modifier.weight(1f)) { showDatePickerFor = "end" }
         }
         val totalDays = runCatching {
             ((fmt.parse(end)!!.time - fmt.parse(start)!!.time) / 86400000L).toInt() + 1
@@ -1534,7 +1569,7 @@ private fun LeaveCard(leave: LeaveRequestDto) {
                 StatusPill(leave.status)
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text("${leave.startDate} → ${leave.endDate}", fontSize = 12.sp, color = textSecondary)
+            Text("${formatDisplayDateDDMMYYYY(leave.startDate)} → ${formatDisplayDateDDMMYYYY(leave.endDate)}", fontSize = 12.sp, color = textSecondary)
             Spacer(modifier = Modifier.height(2.dp))
             Text(leave.reason, fontSize = 12.sp, color = textPrimary)
             leave.decisionReason?.let {

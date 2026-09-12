@@ -40,7 +40,8 @@ import com.example.ui.viewmodel.RealAuthViewModel
 @Composable
 fun RealAuthEntryScreen(
     realAuthViewModel: RealAuthViewModel,
-    onRequestDemoAuthViewModel: () -> AuthViewModel,
+    onRequestDemoAuthViewModel: (() -> AuthViewModel)? = null,
+    onSelectDemoAccount: (BackendEmployee) -> Unit = { realAuthViewModel.enterDemoMode(it) },
     onSignedIn: (BackendEmployee) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -74,7 +75,7 @@ fun RealAuthEntryScreen(
                 errorMessage = uiState.errorMessage,
                 notEligible = uiState.notEligibleForRealAccount,
                 onSubmit = { civilId, pin -> realAuthViewModel.registerWithCivilId(civilId, pin) },
-                onRequestDemoAuthViewModel = onRequestDemoAuthViewModel
+                onSelectDemo = onSelectDemoAccount
             )
         }
     }
@@ -86,7 +87,7 @@ private fun CivilIdRegisterContent(
     errorMessage: String?,
     notEligible: Boolean,
     onSubmit: (civilId: String, pin: String) -> Unit,
-    onRequestDemoAuthViewModel: () -> AuthViewModel
+    onSelectDemo: (BackendEmployee) -> Unit
 ) {
     var civilId by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
@@ -185,7 +186,7 @@ private fun CivilIdRegisterContent(
 
     if (showDemoPicker) {
         DemoAccountPickerDialog(
-            onRequestDemoAuthViewModel = onRequestDemoAuthViewModel,
+            onSelectDemo = onSelectDemo,
             onDismiss = { showDemoPicker = false }
         )
     }
@@ -216,14 +217,14 @@ private fun DemoModeEntryCard(onClick: () -> Unit) {
 }
 
 @Composable
-private fun DemoAccountPickerDialog(onRequestDemoAuthViewModel: () -> AuthViewModel, onDismiss: () -> Unit) {
+private fun DemoAccountPickerDialog(onSelectDemo: (BackendEmployee) -> Unit, onDismiss: () -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column {
                         Text("Choose a Demo Account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("Sample data only — nothing here touches the real backend", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Sample data only — shares the exact same UI as Real Mode", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
                 }
@@ -231,25 +232,73 @@ private fun DemoAccountPickerDialog(onRequestDemoAuthViewModel: () -> AuthViewMo
                 DemoAccountRow(
                     icon = Icons.Default.Shield, name = "Artify Staff Admin", role = "Supervisor Admin",
                     color = MaterialTheme.colorScheme.primary,
-                    onClick = { onRequestDemoAuthViewModel().quickLoginAsEmail("artifystaff@gmail.com") }
+                    onClick = {
+                        onSelectDemo(
+                            BackendEmployee(
+                                id = "USR-ADM-000004",
+                                employeeCode = "ART-ADM-000004",
+                                fullName = "Artify Staff Admin",
+                                role = "ADMIN",
+                                assignedProjectId = "PRJ-001",
+                                isDemo = true
+                            )
+                        )
+                        onDismiss()
+                    }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 DemoAccountRow(
                     icon = Icons.Default.Engineering, name = "Ahmed Ali Al-Balushi", role = "Worker",
                     color = MaterialTheme.colorScheme.secondary,
-                    onClick = { onRequestDemoAuthViewModel().quickLoginAs(UserRole.WORKER) }
+                    onClick = {
+                        onSelectDemo(
+                            BackendEmployee(
+                                id = "ART-W-000001",
+                                employeeCode = "ART-W-000001",
+                                fullName = "Ahmed Ali Al-Balushi",
+                                role = "WORKER",
+                                assignedProjectId = "PRJ-001",
+                                isDemo = true
+                            )
+                        )
+                        onDismiss()
+                    }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 DemoAccountRow(
                     icon = Icons.Default.Work, name = "Fatima Al-Harthy", role = "Staff",
                     color = MaterialTheme.colorScheme.tertiary,
-                    onClick = { onRequestDemoAuthViewModel().quickLoginAs(UserRole.STAFF) }
+                    onClick = {
+                        onSelectDemo(
+                            BackendEmployee(
+                                id = "ART-S-000002",
+                                employeeCode = "ART-S-000002",
+                                fullName = "Fatima Al-Harthy",
+                                role = "STAFF",
+                                assignedProjectId = "PRJ-002",
+                                isDemo = true
+                            )
+                        )
+                        onDismiss()
+                    }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 DemoAccountRow(
                     icon = Icons.Default.AdminPanelSettings, name = "Tariq Al-Said", role = "Supervisor",
                     color = MaterialTheme.colorScheme.error,
-                    onClick = { onRequestDemoAuthViewModel().quickLoginAs(UserRole.SUPERVISOR) }
+                    onClick = {
+                        onSelectDemo(
+                            BackendEmployee(
+                                id = "ART-SP-000003",
+                                employeeCode = "ART-SP-000003",
+                                fullName = "Tariq Al-Said",
+                                role = "SUPERVISOR",
+                                assignedProjectId = "PRJ-001",
+                                isDemo = true
+                            )
+                        )
+                        onDismiss()
+                    }
                 )
             }
         }

@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
-import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.IWorkforceRepository
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceShiftDto
 import com.example.network.AuditLogDto
@@ -33,7 +33,7 @@ data class RealSupervisorUiState(
     val selfieUrlCache: Map<String, String> = emptyMap()
 )
 
-class RealSupervisorViewModel(private val repository: BackendWorkforceRepository) : ViewModel() {
+class RealSupervisorViewModel(private val repository: IWorkforceRepository) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RealSupervisorUiState())
     val uiState: StateFlow<RealSupervisorUiState> = _uiState.asStateFlow()

@@ -17,35 +17,30 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.repository.BackendAuthRepository
 import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.DemoWorkforceRepository
+import com.example.data.repository.IWorkforceRepository
 import com.example.data.repository.SupabaseStorageService
 import com.example.data.repository.WorkforceRepository
 import com.example.data.sync.NetworkMonitor
 import com.example.data.sync.OfflineCache
 import com.example.data.sync.RealSyncManager
 import com.example.location.LocationHelper
-import com.example.model.UserRole
 import com.example.notifications.FcmNotificationManager
 import com.example.security.SecureSessionStore
 import com.example.ui.components.DemoModeBanner
 import com.example.ui.screens.RealAuthEntryScreen
 import com.example.ui.screens.RealSupervisorDashboardScreen
 import com.example.ui.screens.RealWorkerDashboardScreen
-import com.example.ui.screens.SupervisorDashboardScreen
-import com.example.ui.screens.WorkerDashboardScreen
 import com.example.ui.theme.ArtifyTheme
 import com.example.ui.theme.ThemePreferences
-import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.RealAuthScreenState
 import com.example.ui.viewmodel.RealAuthViewModel
 import com.example.ui.viewmodel.RealSupervisorViewModel
 import com.example.ui.viewmodel.RealWorkerViewModel
-import com.example.ui.viewmodel.SupervisorViewModel
-import com.example.ui.viewmodel.WorkerViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -132,164 +127,75 @@ fun ArtifyAppRoot() {
         permissionLauncher.launch(permissionsToRequest.toTypedArray())
     }
 
-    // Demo Mode's database/repository/view model are intentionally NOT created until a
-    // demo account is actually requested. Building them eagerly here would seed the local
-    // Demo database and start the Firestore sync manager on every single app launch, even
-    // for a user who only ever uses Real Mode.
-    var demoAuthViewModel by remember { mutableStateOf<AuthViewModel?>(null) }
-    var demoRepository by remember { mutableStateOf<WorkforceRepository?>(null) }
-    val ensureDemoAuthViewModel: () -> AuthViewModel = ensure@{
-        demoAuthViewModel?.let { return@ensure it }
-        val db = AppDatabase.getInstance(context)
-        val repo = WorkforceRepository(db, context.applicationContext)
-        val vm = AuthViewModel(repo)
-        demoRepository = repo
-        demoAuthViewModel = vm
-        vm
-    }
-    val demoAuthState = demoAuthViewModel?.uiState?.collectAsState()?.value
-
     val signedInEmployee = realAuthState.signedInEmployee
 
     // Register FCM notifications for authenticated Real Mode employee
     LaunchedEffect(signedInEmployee?.id) {
         signedInEmployee?.let { emp ->
-            FcmNotificationManager.registerEmployeeForPushNotifications(
-                context = context,
-                employeeId = emp.employeeCode,
-                role = emp.role,
-                fullName = emp.fullName
-            )
+            if (!emp.isDemo) {
+                FcmNotificationManager.registerEmployeeForPushNotifications(
+                    context = context,
+                    employeeId = emp.employeeCode,
+                    role = emp.role,
+                    fullName = emp.fullName
+                )
+            }
         }
     }
 
     when {
         realAuthState.screen == RealAuthScreenState.SIGNED_IN && signedInEmployee != null -> {
-            val backendWorkforceRepository = remember(signedInEmployee.id) {
-                BackendWorkforceRepository(realAuthRepository, SecureSessionStore.getInstance(context))
-            }
-            if (signedInEmployee.role == "SUPERVISOR" || signedInEmployee.role == "ADMIN") {
-                val supervisorViewModel = remember(signedInEmployee.id) { RealSupervisorViewModel(backendWorkforceRepository) }
-                RealSupervisorDashboardScreen(
-                    viewModel = supervisorViewModel,
-                    supervisorName = signedInEmployee.fullName,
-                    supervisorCode = signedInEmployee.employeeCode,
-                    onLogout = { realAuthViewModel.logout() }
-                )
+            val workforceRepository: IWorkforceRepository = if (signedInEmployee.isDemo) {
+                remember(signedInEmployee.id) {
+                    val db = AppDatabase.getInstance(context)
+                    val demoRepo = WorkforceRepository(db, context.applicationContext)
+                    kotlinx.coroutines.runBlocking { demoRepo.seedInitialDataIfEmpty() }
+                    DemoWorkforceRepository(db, signedInEmployee.id, context)
+                }
             } else {
-                val locationHelper = remember { LocationHelper(context) }
-                val syncManager = remember(signedInEmployee.id) {
-                    RealSyncManager(context, backendWorkforceRepository, NetworkMonitor(context), signedInEmployee.id)
+                remember(signedInEmployee.id) {
+                    BackendWorkforceRepository(realAuthRepository, SecureSessionStore.getInstance(context))
                 }
-                val offlineCache = remember { OfflineCache(context) }
-                val storageService = remember { SupabaseStorageService(context) }
-                val workerViewModel = remember(signedInEmployee.id) {
-                    RealWorkerViewModel(backendWorkforceRepository, locationHelper, syncManager, offlineCache, signedInEmployee.id, storageService)
-                }
-                RealWorkerDashboardScreen(
-                    viewModel = workerViewModel,
-                    employeeName = signedInEmployee.fullName,
-                    employeeCode = signedInEmployee.employeeCode,
-                    onLogout = { realAuthViewModel.logout() }
-                )
             }
-        }
-        demoAuthState?.currentUser != null -> {
-            ArtifyDemoModeRoot(repository = demoRepository!!, authViewModel = demoAuthViewModel!!, user = demoAuthState.currentUser)
+
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (signedInEmployee.isDemo) {
+                    DemoModeBanner()
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    if (signedInEmployee.role == "SUPERVISOR" || signedInEmployee.role == "ADMIN") {
+                        val supervisorViewModel = remember(signedInEmployee.id) { RealSupervisorViewModel(workforceRepository) }
+                        RealSupervisorDashboardScreen(
+                            viewModel = supervisorViewModel,
+                            supervisorName = signedInEmployee.fullName,
+                            supervisorCode = signedInEmployee.employeeCode,
+                            onLogout = { realAuthViewModel.logout() }
+                        )
+                    } else {
+                        val locationHelper = remember { LocationHelper(context) }
+                        val syncManager = remember(signedInEmployee.id) {
+                            RealSyncManager(context, workforceRepository, NetworkMonitor(context), signedInEmployee.id)
+                        }
+                        val offlineCache = remember { OfflineCache(context) }
+                        val storageService = remember { SupabaseStorageService(context) }
+                        val workerViewModel = remember(signedInEmployee.id) {
+                            RealWorkerViewModel(workforceRepository, locationHelper, syncManager, offlineCache, signedInEmployee.id, storageService)
+                        }
+                        RealWorkerDashboardScreen(
+                            viewModel = workerViewModel,
+                            employeeName = signedInEmployee.fullName,
+                            employeeCode = signedInEmployee.employeeCode,
+                            onLogout = { realAuthViewModel.logout() }
+                        )
+                    }
+                }
+            }
         }
         else -> {
             RealAuthEntryScreen(
                 realAuthViewModel = realAuthViewModel,
-                onRequestDemoAuthViewModel = ensureDemoAuthViewModel,
                 onSignedIn = {}
             )
-        }
-    }
-}
-
-@Composable
-private fun ArtifyDemoModeRoot(repository: WorkforceRepository, authViewModel: AuthViewModel, user: com.example.data.entity.UserEntity) {
-    val context = LocalContext.current
-    val locationHelper = remember { LocationHelper(context) }
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        repository.seedInitialDataIfEmpty()
-    }
-
-    // Dynamic Permission Launcher for Location, Camera, and Notifications
-    var hasLocationPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-    }
-
-    LaunchedEffect(Unit) {
-        val permissionsToRequest = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.CAMERA
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        permissionLauncher.launch(permissionsToRequest.toTypedArray())
-    }
-
-    // Register FCM notifications for authenticated user
-    LaunchedEffect(user.userId) {
-        FcmNotificationManager.registerUserForPushNotifications(context, user)
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        DemoModeBanner()
-        Box(modifier = Modifier.weight(1f)) {
-            when (user.role) {
-                UserRole.SUPERVISOR.name -> {
-                    val supervisorViewModel = remember(user.userId) {
-                        SupervisorViewModel(repository, user)
-                    }
-                    SupervisorDashboardScreen(
-                        supervisorViewModel = supervisorViewModel,
-                        onLogoutClick = { authViewModel.logout() }
-                    )
-                }
-                else -> {
-                    // Worker or Staff
-                    val workerViewModel = remember(user.userId) {
-                        WorkerViewModel(repository, user)
-                    }
-
-                    // Feed device location if available
-                    LaunchedEffect(hasLocationPermission) {
-                        if (hasLocationPermission) {
-                            coroutineScope.launch {
-                                val loc = locationHelper.getCurrentLocation()
-                                if (loc != null) {
-                                    workerViewModel.onDeviceLocationReceived(loc)
-                                }
-                            }
-                        }
-                    }
-
-                    WorkerDashboardScreen(
-                        workerViewModel = workerViewModel,
-                        repository = repository,
-                        locationHelper = locationHelper,
-                        onLogoutClick = { authViewModel.logout() }
-                    )
-                }
-            }
         }
     }
 }

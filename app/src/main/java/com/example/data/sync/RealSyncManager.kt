@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import com.example.data.repository.BackendResult
 import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.IWorkforceRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +44,7 @@ data class SyncQueueStatus(
  */
 class RealSyncManager(
     private val context: Context,
-    private val repository: BackendWorkforceRepository,
+    private val repository: IWorkforceRepository,
     private val networkMonitor: NetworkMonitor,
     private val employeeId: String
 ) {
