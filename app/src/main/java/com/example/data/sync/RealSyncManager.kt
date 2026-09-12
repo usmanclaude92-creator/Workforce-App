@@ -157,7 +157,6 @@ class RealSyncManager(
             is BackendResult.Success -> {
                 dao.updateAttendanceEvent(item.copy(syncStatus = SyncStatus.SYNCED, syncedAtEpochMs = System.currentTimeMillis(), lastError = null))
                 item.selfieLocalPath?.let { runCatching { File(it).delete() } }
-                uploadAttendanceEventToFirestore(item)
                 true
             }
             is BackendResult.Failure -> {
@@ -213,32 +212,11 @@ class RealSyncManager(
         return com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(path)
     }
 
-    private fun uploadAttendanceEventToFirestore(item: PendingAttendanceEventEntity) {
-        try {
-            val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-            val isClockIn = item.action == "clock_in"
-            val actionCollection = if (isClockIn) "clock_ins" else "clock_outs"
-            val payload = mapOf(
-                "eventId" to item.clientEventId,
-                "attendanceId" to item.clientEventId,
-                "employeeId" to item.employeeId,
-                "action" to item.action,
-                "recordType" to if (isClockIn) "CHECK_IN" else "CHECK_OUT",
-                "deviceTimestamp" to item.deviceTimestamp,
-                "latitude" to item.latitude,
-                "longitude" to item.longitude,
-                "gpsAccuracyMeters" to item.gpsAccuracyMeters,
-                "isMockLocation" to item.isMockLocation,
-                "queuedAtEpochMs" to item.queuedAtEpochMs,
-                "syncedAtEpochMs" to System.currentTimeMillis(),
-                "syncSource" to "ROOM_REAL_SYNC_V2"
-            )
-            firestore.collection("attendance_records").document(item.clientEventId)
-                .set(payload, com.google.firebase.firestore.SetOptions.merge())
-            firestore.collection(actionCollection).document(item.clientEventId)
-                .set(payload, com.google.firebase.firestore.SetOptions.merge())
-        } catch (e: Exception) {
-            // Non-blocking firestore sync mirror
-        }
-    }
+    // NOTE: this used to also mirror every synced real attendance event into the Firestore
+    // "attendance_records" / "clock_ins" / "clock_outs" collections — the same collections the
+    // legacy Demo-mode path (FirestoreSyncManager, via WorkforceRepository) writes to. Nothing in
+    // the Real/HCMS flow ever read that mirror back (HCMS reads attendance from the Supabase
+    // `attendance_shifts` table, not Firestore), so it was a pure duplicate write whose only real
+    // effect was mixing production attendance records into a Demo-only data store. Removed to keep
+    // Demo and Real data isolated, per the production-readiness/data-integrity requirements.
 }

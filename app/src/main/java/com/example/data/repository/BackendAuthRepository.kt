@@ -168,18 +168,23 @@ class BackendAuthRepository(private val sessionStore: SecureSessionStore) {
         )
     }
 
-    /** Reads the `exp` claim out of the (non-secret, base64url) JWT payload segment. */
-    private fun decodeExpiry(jwt: String): Long {
-        return try {
-            val payloadSegment = jwt.split(".")[1]
-            val decoded = android.util.Base64.decode(
-                payloadSegment.replace('-', '+').replace('_', '/'),
-                android.util.Base64.DEFAULT
-            )
-            val json = org.json.JSONObject(String(decoded, Charsets.UTF_8))
-            json.getLong("exp")
-        } catch (e: Exception) {
-            (System.currentTimeMillis() / 1000) + 60 // conservative: treat as near-expiry
-        }
+    /**
+     * The backend (`pin-login` / `civil-id-register` / `refresh-session` edge functions) issues an
+     * opaque, non-JWT session token of the form `session_<employeeId>_<uuid>` — it has no header/payload/
+     * signature segments and no embedded `exp` claim, and `device_sessions` carries no expiry column either;
+     * the token stays valid until it is explicitly rotated by a refresh call. There is nothing to decode.
+     *
+     * This used to attempt a JWT-style decode here, which always failed for these tokens and fell back to
+     * "expires in 60s" — so [refreshAccessTokenIfNeeded] treated every session as already expired and
+     * forced an extra refresh-session round trip (and token rotation) before every single authenticated
+     * request. Assume a long, safe validity window instead so a healthy session isn't refreshed needlessly;
+     * a session actually invalidated server-side still surfaces normally as a "Session expired" failure.
+     */
+    private fun decodeExpiry(@Suppress("UNUSED_PARAMETER") token: String): Long {
+        return (System.currentTimeMillis() / 1000) + ASSUMED_SESSION_VALIDITY_SECONDS
+    }
+
+    companion object {
+        private const val ASSUMED_SESSION_VALIDITY_SECONDS = 12L * 60 * 60 // 12 hours
     }
 }

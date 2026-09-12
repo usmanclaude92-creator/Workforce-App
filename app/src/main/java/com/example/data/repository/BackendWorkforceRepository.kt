@@ -142,16 +142,30 @@ class BackendWorkforceRepository(
                         )
                     )
                 } else {
-                    try {
+                    // Both the primary edge function and the clock_in/clock_out fallback rejected this
+                    // event. Previously this branch swallowed the raw-insert outcome entirely and always
+                    // reported success, so a genuinely failed attendance event could be silently dropped
+                    // while the UI told the employee it was recorded. Surface the real outcome instead.
+                    val rawResp = try {
                         api.recordAttendanceVerificationTable(ArtifyBackendConfig.ATTENDANCE_VERIFICATIONS_URL, auth, "return=minimal", entry)
-                    } catch (_: Exception) { }
-                    BackendResult.Success(
-                        AttendanceVerificationResponse(
-                            success = true,
-                            message = "Biometric attendance verification registered in Supabase database.",
-                            entry = entry
+                    } catch (e: IOException) {
+                        return BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+                    } catch (e: Exception) {
+                        return BackendResult.Failure("Attendance verification storage error: ${e.message ?: "unexpected error"}")
+                    }
+                    if (rawResp.isSuccessful) {
+                        BackendResult.Success(
+                            AttendanceVerificationResponse(
+                                success = true,
+                                message = "Biometric attendance verification registered in Supabase database.",
+                                entry = entry
+                            )
                         )
-                    )
+                    } else {
+                        BackendResult.Failure(
+                            userFriendlyError(null, rawResp.code(), "Attendance verification could not be recorded (${rawResp.code()}).")
+                        )
+                    }
                 }
             }
         } catch (e: IOException) {

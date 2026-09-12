@@ -1,6 +1,5 @@
 package com.example.ui.viewmodel
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
@@ -269,28 +268,16 @@ class RealWorkerViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showStartShiftDialog = false)
             val location = locationHelper.getCurrentLocation()
-            val localFile = File(selfieFilePath)
 
-            // Step 1: Upload new selfie to Supabase Storage if available
-            var uploadedPublicUrl: String? = null
-            if (storageService != null && localFile.exists()) {
-                val fileName = "selfie_${employeeId}_${System.currentTimeMillis()}.jpg"
-                val uploadResult = storageService.uploadSelfieFile(localFile, fileName)
-                if (uploadResult.isSuccess) {
-                    val url = uploadResult.getOrThrow()
-                    // Step 2: Verify accessibility
-                    if (storageService.verifySelfieAccessible(url)) {
-                        uploadedPublicUrl = url
-                        Log.i("RealWorkerViewModel", "Shift-start selfie uploaded and verified in storage: $url")
-                    }
-                }
-            }
-
+            // The selfie is uploaded exactly once, server-side, by the `attendance` edge function from
+            // the base64 payload below (the same path clock-out and the offline sync queue already use).
+            // This used to also upload the same file directly to Supabase Storage from the client first —
+            // a second, redundant copy of every clock-in selfie with no reader depending on it, since the
+            // canonical evidence photo is always the one the edge function stores against the shift record.
             val selfieBase64 = encodeSelfie(selfieFilePath)
             val clientEventId = UUID.randomUUID().toString()
             val deviceTimestamp = Instant.now().toString()
 
-            // Step 3: Clock in via Backend API
             val result = repository.clockIn(
                 clientEventId = clientEventId, deviceTimestamp = deviceTimestamp,
                 latitude = location?.latitude, longitude = location?.longitude,
@@ -298,23 +285,11 @@ class RealWorkerViewModel(
             )
             when (result) {
                 is BackendResult.Success -> {
-                    // Update cache with verified URL immediately so UI renders without delay
                     val shift = result.value.shift
-                    val updatedCache = if (uploadedPublicUrl != null) {
-                        val selfieKey = shift?.clockIn?.selfieStoragePath.orEmpty()
-                        if (selfieKey.isNotEmpty()) {
-                            _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl) + (selfieKey to uploadedPublicUrl)
-                        } else {
-                            _uiState.value.selfieUrlCache + (uploadedPublicUrl to uploadedPublicUrl)
-                        }
-                    } else _uiState.value.selfieUrlCache
-
-                    // Delete old temporary capture file
                     runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         activeShift = shift,
-                        selfieUrlCache = updatedCache,
                         statusMessage = "Shift started."
                     )
                 }

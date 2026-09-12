@@ -198,7 +198,6 @@ class AttendanceSyncWorker(
                 item.selfieLocalPath?.let { path ->
                     runCatching { File(path).delete() }
                 }
-                mirrorToFirestore(item)
                 true
             }
             is BackendResult.Failure -> {
@@ -259,28 +258,9 @@ class AttendanceSyncWorker(
         }
     }
 
-    private fun mirrorToFirestore(item: PendingAttendanceEventEntity) {
-        try {
-            val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-            val isClockIn = item.action == "clock_in"
-            val payload = mapOf(
-                "eventId" to item.clientEventId,
-                "attendanceId" to item.clientEventId,
-                "employeeId" to item.employeeId,
-                "action" to item.action,
-                "recordType" to if (isClockIn) "CHECK_IN" else "CHECK_OUT",
-                "deviceTimestamp" to item.deviceTimestamp,
-                "latitude" to item.latitude,
-                "longitude" to item.longitude,
-                "gpsAccuracyMeters" to item.gpsAccuracyMeters,
-                "isMockLocation" to item.isMockLocation,
-                "syncedAtEpochMs" to System.currentTimeMillis(),
-                "syncSource" to "WORK_MANAGER_BACKGROUND_SYNC"
-            )
-            firestore.collection("attendance_records").document(item.clientEventId)
-                .set(payload, com.google.firebase.firestore.SetOptions.merge())
-        } catch (_: Exception) {
-            // Non-fatal firestore mirror
-        }
-    }
+    // NOTE: this used to also mirror every synced real attendance event into the Firestore
+    // "attendance_records" collection that the legacy Demo-mode path (FirestoreSyncManager) writes
+    // to. Nothing in the Real/HCMS flow read that mirror back, so it was a pure duplicate write that
+    // mixed production attendance data into a Demo-only store. Removed — see RealSyncManager for the
+    // matching removal on the foreground sync path.
 }
