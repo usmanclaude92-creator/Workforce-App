@@ -138,7 +138,7 @@ class SupabaseAttendanceVerificationService(
         // Attempt 2: If edge function wasn't active, attempt direct PostgREST table insert
         if (!isStoredInSupabase) {
             try {
-                val tableResp = api.recordAttendanceVerificationTable(authHeader, "return=minimal", entry)
+                val tableResp = api.recordAttendanceVerificationTable(ArtifyBackendConfig.ATTENDANCE_VERIFICATIONS_URL, authHeader, "return=minimal", entry)
                 if (tableResp.isSuccessful) {
                     isStoredInSupabase = true
                     responseMessage = "Verification entry successfully created in Supabase 'attendance_verifications' table."

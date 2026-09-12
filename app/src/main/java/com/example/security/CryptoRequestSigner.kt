@@ -2,6 +2,7 @@ package com.example.security
 
 import android.os.SystemClock
 import android.util.Base64
+import com.example.BuildConfig
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
@@ -18,11 +19,19 @@ import javax.crypto.spec.SecretKeySpec
  * - Server-synchronized timestamp
  * - Single-use cryptographic nonce with replay protection cache
  * - SHA-256 payload digest binding
+ *
+ * IMPORTANT LIMITATION: this key ships inside the APK. Unlike a server-side secret, a key
+ * embedded in a native client can always be recovered by a sufficiently motivated attacker
+ * (decompile + string search) -- moving it out of a source literal and into a build-time
+ * secret (see .env / .env.example) stops it from being trivially visible in this repo's
+ * git history, but it is not equivalent to a real secret and should not be treated as the
+ * primary defense. The primary defense is the server-side identity checks (PIN verified
+ * against its stored hash, session tokens validated against device_sessions, etc.).
  */
 object CryptoRequestSigner {
 
     private const val HMAC_SHA256 = "HmacSHA256"
-    private const val DEFAULT_SIGNING_KEY = "artify-workforce-production-hmac-integrity-key-v1"
+    private val DEFAULT_SIGNING_KEY: String = BuildConfig.WORKFORCE_HMAC_SIGNING_KEY
 
     // In-memory cache of recently observed nonces to reject duplicate replays within tolerance window
     private val observedNonces = ConcurrentHashMap<String, Long>()

@@ -4,6 +4,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Url
 
 /** Maps 1:1 onto the deployed `artify-workforce` Supabase Edge Functions. */
 interface SupabaseApi {
@@ -29,8 +30,12 @@ interface SupabaseApi {
     @POST("attendance-verify")
     suspend fun verifyAttendance(@Header("Authorization") bearerToken: String, @Body request: AttendanceVerificationEntry): Response<AttendanceVerificationResponse>
 
-    @POST("${ArtifyBackendConfig.SUPABASE_URL}/rest/v1/attendance_verifications")
+    // Absolute URL passed via @Url rather than baked into @POST("..."): SUPABASE_URL is now
+    // sourced from BuildConfig (a build-time value), and annotation arguments must be actual
+    // Kotlin compile-time constants, which a BuildConfig-backed property no longer is.
+    @POST
     suspend fun recordAttendanceVerificationTable(
+        @Url url: String,
         @Header("Authorization") bearerToken: String,
         @Header("Prefer") prefer: String = "return=minimal",
         @Body request: AttendanceVerificationEntry

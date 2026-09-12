@@ -143,7 +143,7 @@ class BackendWorkforceRepository(
                     )
                 } else {
                     try {
-                        api.recordAttendanceVerificationTable(auth, "return=minimal", entry)
+                        api.recordAttendanceVerificationTable(ArtifyBackendConfig.ATTENDANCE_VERIFICATIONS_URL, auth, "return=minimal", entry)
                     } catch (_: Exception) { }
                     BackendResult.Success(
                         AttendanceVerificationResponse(
