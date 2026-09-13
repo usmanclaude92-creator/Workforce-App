@@ -21,6 +21,8 @@ import com.example.network.SubmitLeaveRequest
 import com.example.network.SupervisorActionRequest
 import com.example.network.SupervisorMetricsDto
 import com.example.security.SecureSessionStore
+import okhttp3.ResponseBody
+import org.json.JSONObject
 import java.io.IOException
 
 /** Simple Result-style wrapper so callers get either the payload or a user-facing message. */
@@ -64,6 +66,22 @@ class BackendWorkforceRepository(
     ): BackendResult<AttendanceEventResponse> =
         attendanceEvent("clock_out", clientEventId, deviceTimestamp, latitude, longitude, accuracy, isMockLocation, selfieBase64)
 
+    // Every Edge Function here returns its specific rejection reason as {"error": "..."} in
+    // the response body, but Retrofit only decodes a body through the typed converter when
+    // the HTTP status is 2xx -- response.body() is unconditionally null otherwise. The real
+    // JSON is only reachable via errorBody(), read as plain text here (not through Moshi)
+    // since every DTO in this file already shares this one "error" field and a generic
+    // JSONObject lookup avoids needing a typed adapter per call site.
+    private fun extractServerErrorMessage(errorBody: ResponseBody?): String? {
+        val raw = try { errorBody?.string() } catch (e: Exception) { null }
+        if (raw.isNullOrBlank()) return null
+        return try {
+            JSONObject(raw).optString("error").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun userFriendlyError(rawError: String?, httpCode: Int? = null, fallback: String = "Request failed."): String {
         if (rawError.isNullOrBlank()) {
             return when (httpCode) {
@@ -100,7 +118,16 @@ class BackendWorkforceRepository(
             val response = if (action == "clock_in") api.clockIn(auth, request) else api.clockOut(auth, request)
             val body = response.body()
             if (!response.isSuccessful || body?.shift == null) {
-                BackendResult.Failure(userFriendlyError(body?.error, response.code(), "Request failed (${response.code()})."))
+                // Retrofit's typed body() is ALWAYS null on a non-2xx response, regardless of
+                // what the server actually returned -- so body?.error here was never anything
+                // but null, and every real backend rejection (e.g. "Employee record not found
+                // or inactive.") was silently discarded in favor of one of four generic,
+                // status-code-only fallback messages below. That's why an employee who was
+                // just marked inactive in HCMS saw the unhelpful "Requested item was not
+                // found." on clock-out instead of the actual, actionable reason. The real
+                // message lives in errorBody(), which this now reads instead.
+                val serverError = body?.error ?: extractServerErrorMessage(response.errorBody())
+                BackendResult.Failure(userFriendlyError(serverError, response.code(), "Request failed (${response.code()})."))
             } else {
                 BackendResult.Success(body)
             }
