@@ -161,9 +161,11 @@ serve(async (req: Request) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
+    // Was status 200 -- an unhandled exception here looked identical to a real
+    // successful (if empty) status response.
     return new Response(
       JSON.stringify({ error: err.message }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

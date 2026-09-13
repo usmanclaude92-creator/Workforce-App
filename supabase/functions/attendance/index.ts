@@ -273,7 +273,7 @@ serve(async (req: Request) => {
       const shiftId = crypto.randomUUID();
       const publicSelfieUrl = await resolveSelfieUrl(body, emp.id);
 
-      const { data: newShift } = await supabase
+      const { data: newShift, error: insertErr } = await supabase
         .from("attendance_shifts")
         .insert({
           id: shiftId,
@@ -290,7 +290,18 @@ serve(async (req: Request) => {
         .select()
         .single();
 
-      const shiftDto = formatShiftDto(newShift ?? { id: shiftId, status: "OPEN" }, publicSelfieUrl, geofence);
+      // A failed insert must never look like a successful clock-in. Previously this
+      // fell back to a synthesized-in-memory shift object and still returned 200 --
+      // the phone showed "Shift started" while nothing was actually saved, with no
+      // error visible anywhere. Surface the real database error instead.
+      if (insertErr || !newShift) {
+        return new Response(
+          JSON.stringify({ error: `Could not save clock-in: ${insertErr?.message ?? "unknown database error"}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const shiftDto = formatShiftDto(newShift, publicSelfieUrl, geofence);
 
       return new Response(
         JSON.stringify({
@@ -328,7 +339,7 @@ serve(async (req: Request) => {
       // staying frozen at the clock-in's result.
       const publicEndSelfieUrl = await resolveSelfieUrl(body, `${emp.id}_end`);
 
-      const { data: updatedShift } = await supabase
+      const { data: updatedShift, error: updateErr } = await supabase
         .from("attendance_shifts")
         .update({
           status: "COMPLETED",
@@ -343,6 +354,17 @@ serve(async (req: Request) => {
         .select()
         .maybeSingle();
 
+      // Distinguish a real database error (500 -- something is actually broken) from
+      // the legitimate business case of no open shift existing (409 -- nothing to fix,
+      // the employee just hasn't clocked in). Previously both cases were indistinguishable
+      // (both just "no row came back"), which is exactly how a silently-failed clock-in
+      // upstream would surface downstream as a confusing "No open shift to close" here.
+      if (updateErr) {
+        return new Response(
+          JSON.stringify({ error: `Could not save clock-out: ${updateErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       if (!updatedShift) {
         return new Response(
           JSON.stringify({ error: "No open shift to close." }),
@@ -388,9 +410,11 @@ serve(async (req: Request) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
+    // Was status 200 -- an unhandled exception here (malformed body, a thrown error
+    // anywhere above) looked identical to a real success at the HTTP layer.
     return new Response(
       JSON.stringify({ error: err.message ?? "Error" }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
