@@ -188,7 +188,9 @@ serve(async (req: Request) => {
 
     function formatShiftDto(dbShift: any, selfieUrl: string | null = null, geofence?: ReturnType<typeof evaluateGeofence>) {
       const isCompleted = dbShift.status === "COMPLETED";
-      const g = geofence ?? { status: dbShift.geofence_status ?? "UNKNOWN", distance: dbShift.geofence_distance_meters ?? null, compliant: dbShift.is_geofence_exception === false, reason: null };
+      // compliance_flag is the only geofence result actually stored on this table
+      // (there is no is_geofence_exception column -- see the clock-in insert above).
+      const g = geofence ?? { status: dbShift.geofence_status ?? "UNKNOWN", distance: dbShift.geofence_distance_meters ?? null, compliant: dbShift.compliance_flag === "VERIFIED", reason: null };
       return {
         id: dbShift.id,
         employee_id: emp.id,
@@ -282,10 +284,16 @@ serve(async (req: Request) => {
           shift_date: today,
           clock_in_event_id: clockInId,
           status: "OPEN",
+          // The actual compliant/non-compliant result lives in compliance_flag (a real
+          // column on this table) -- attendance_shifts has no is_geofence_exception
+          // column at all. Writing it here used to make PostgREST reject the whole
+          // insert with a schema-cache error ("Could not find the 'is_geofence_exception'
+          // column..."), which is exactly what surfaced as "Could not save clock-in" /
+          // "Workforce server is temporarily unavailable" once the silent-failure bug
+          // above was fixed -- every real clock-in was failing this way.
           compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
           clock_in_time: nowIso,
-          selfie_url: publicSelfieUrl,
-          is_geofence_exception: geofence.status !== "INSIDE"
+          selfie_url: publicSelfieUrl
         })
         .select()
         .single();
@@ -293,8 +301,10 @@ serve(async (req: Request) => {
       // A failed insert must never look like a successful clock-in. Previously this
       // fell back to a synthesized-in-memory shift object and still returned 200 --
       // the phone showed "Shift started" while nothing was actually saved, with no
-      // error visible anywhere. Surface the real database error instead.
+      // error visible anywhere. Surface the real database error instead, and log it
+      // server-side so a future failure is diagnosable without guessing.
       if (insertErr || !newShift) {
+        console.error("[attendance] clock-in insert failed:", JSON.stringify(insertErr));
         return new Response(
           JSON.stringify({ error: `Could not save clock-in: ${insertErr?.message ?? "unknown database error"}` }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -360,6 +370,7 @@ serve(async (req: Request) => {
       // (both just "no row came back"), which is exactly how a silently-failed clock-in
       // upstream would surface downstream as a confusing "No open shift to close" here.
       if (updateErr) {
+        console.error("[attendance] clock-out update failed:", JSON.stringify(updateErr));
         return new Response(
           JSON.stringify({ error: `Could not save clock-out: ${updateErr.message}` }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -411,7 +422,10 @@ serve(async (req: Request) => {
     );
   } catch (err: any) {
     // Was status 200 -- an unhandled exception here (malformed body, a thrown error
-    // anywhere above) looked identical to a real success at the HTTP layer.
+    // anywhere above) looked identical to a real success at the HTTP layer. Logged
+    // server-side (not just returned to the client) so a future failure is diagnosable
+    // from function logs without needing to guess.
+    console.error("[attendance] unhandled error:", err?.message, err?.stack);
     return new Response(
       JSON.stringify({ error: err.message ?? "Error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
