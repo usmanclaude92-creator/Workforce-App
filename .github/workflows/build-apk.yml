@@ -29,9 +29,17 @@ jobs:
           fi
           chmod +x gradlew
 
-      - name: Generate Debug Keystore
+      - name: Generate Debug Keystore (only if not already committed)
+        # IMPORTANT: debug.keystore is committed at the repo root specifically so every CI run
+        # (and every local build) signs with the SAME certificate. Regenerating it unconditionally
+        # on every run, as this step used to, gave every build a brand-new random signature --
+        # which is why installing a newer debug APK over an older one failed with Android's
+        # "App not installed as package conflicts with an existing package" error. Only generate
+        # a fallback here if the committed keystore is ever missing.
         run: |
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace

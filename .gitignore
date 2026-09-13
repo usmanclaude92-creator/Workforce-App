@@ -15,4 +15,8 @@
 .cxx
 local.properties
 .env
-debug.keystore
+# debug.keystore is intentionally NOT ignored: it is committed at the repo root so every build
+# (CI or local) signs debug APKs with the same certificate. A debug keystore carries no real
+# secret (it's never used for release/Play Store signing) -- committing it is standard practice,
+# and it's what prevents "package conflicts with the current package" install errors caused by
+# each build environment generating its own random debug certificate.
