@@ -17,6 +17,20 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Approximates the local UTC offset for a longitude using the standard "15 degrees of
+// longitude per hour" solar-time rule, so the business date follows wherever a project's
+// own GPS coordinates actually are instead of a single hardcoded timezone string. Falls
+// back to Oman's fixed UTC+4 offset (Asia/Muscat has no DST) only when a project has no
+// coordinates configured yet.
+const FALLBACK_UTC_OFFSET_HOURS = 4;
+function utcOffsetHoursFromLongitude(lon: number): number {
+  return Math.round(lon / 15);
+}
+function localDateFromGps(iso: string, lon: number | null | undefined): string {
+  const offsetHours = typeof lon === "number" && !isNaN(lon) ? utcOffsetHoursFromLongitude(lon) : FALLBACK_UTC_OFFSET_HOURS;
+  return new Date(new Date(iso).getTime() + offsetHours * 3600000).toISOString().slice(0, 10);
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -112,7 +126,11 @@ serve(async (req: Request) => {
     }
 
     const nowIso = new Date().toISOString();
-    const today = nowIso.split("T")[0];
+    // Local business date is derived from the assigned project's own GPS coordinates
+    // (falling back to Oman's UTC+4 offset when a project has no coordinates configured),
+    // rather than the raw UTC calendar date -- so "today" always matches the wall-clock
+    // date where the work is actually happening.
+    const today = localDateFromGps(nowIso, projectLon);
 
     // Real geofence evaluation. If the project has no coordinates configured yet, the
     // status is UNKNOWN (and flagged for manual review) rather than assumed compliant.
@@ -128,6 +146,44 @@ serve(async (req: Request) => {
       }
       const distance = haversineMeters(lat, lon, projectLat, projectLon);
       return { status: distance <= geofenceRadius ? ("INSIDE" as const) : ("OUTSIDE" as const), distance, compliant: distance <= geofenceRadius, reason: null };
+    }
+
+    // Resolves an uploaded selfie's public URL from whichever shape the client sent it
+    // in (a ready-made URL, a storage path, or a raw base64 payload uploaded here).
+    // Shared by both clock-in and clock-out so a shift-end selfie is captured the same
+    // reliable way a shift-start selfie already is.
+    async function resolveSelfieUrl(reqBody: any, fileNameSeed: string): Promise<string | null> {
+      if (reqBody.selfie_url || reqBody.storage_url) {
+        return reqBody.selfie_url ?? reqBody.storage_url;
+      }
+      if (reqBody.selfie_storage_path) {
+        const cleanPath = reqBody.selfie_storage_path.replace(/^attendance-selfies\//, '');
+        return `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/attendance-selfies/${cleanPath}`;
+      }
+      const rawBase64 = reqBody.selfie_base64 ?? reqBody.selfieBase64 ?? reqBody.selfie;
+      if (rawBase64 && typeof rawBase64 === "string" && rawBase64.length > 50) {
+        try {
+          const cleanBase64 = rawBase64.replace(/^data:image\/\w+;base64,/, "").replace(/[\r\n\s]/g, "");
+          const binaryString = atob(cleanBase64);
+          const bytes = Uint8Array.from(binaryString, (c) => c.charCodeAt(0));
+          const blob = new Blob([bytes], { type: "image/jpeg" });
+
+          const fileName = `selfie_${fileNameSeed}_${Date.now()}.jpg`;
+          const { error: uploadErr } = await supabase
+            .storage
+            .from("attendance-selfies")
+            .upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
+
+          if (!uploadErr) {
+            const { data: urlData } = supabase
+              .storage
+              .from("attendance-selfies")
+              .getPublicUrl(fileName);
+            return urlData.publicUrl;
+          }
+        } catch (_) {}
+      }
+      return null;
     }
 
     function formatShiftDto(dbShift: any, selfieUrl: string | null = null, geofence?: ReturnType<typeof evaluateGeofence>) {
@@ -215,38 +271,7 @@ serve(async (req: Request) => {
 
       const clockInId = crypto.randomUUID();
       const shiftId = crypto.randomUUID();
-      let publicSelfieUrl: string | null = null;
-
-      if (body.selfie_url || body.storage_url) {
-        publicSelfieUrl = body.selfie_url ?? body.storage_url;
-      } else if (body.selfie_storage_path) {
-        const cleanPath = body.selfie_storage_path.replace(/^attendance-selfies\//, '');
-        publicSelfieUrl = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/attendance-selfies/${cleanPath}`;
-      } else {
-        const rawBase64 = body.selfie_base64 ?? body.selfieBase64 ?? body.selfie;
-        if (rawBase64 && typeof rawBase64 === "string" && rawBase64.length > 50) {
-          try {
-            const cleanBase64 = rawBase64.replace(/^data:image\/\w+;base64,/, "").replace(/[\r\n\s]/g, "");
-            const binaryString = atob(cleanBase64);
-            const bytes = Uint8Array.from(binaryString, (c) => c.charCodeAt(0));
-            const blob = new Blob([bytes], { type: "image/jpeg" });
-
-            const fileName = `selfie_${emp.id}_${Date.now()}.jpg`;
-            const { error: uploadErr } = await supabase
-              .storage
-              .from("attendance-selfies")
-              .upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
-
-            if (!uploadErr) {
-              const { data: urlData } = supabase
-                .storage
-                .from("attendance-selfies")
-                .getPublicUrl(fileName);
-              publicSelfieUrl = urlData.publicUrl;
-            }
-          } catch (_) {}
-        }
-      }
+      const publicSelfieUrl = await resolveSelfieUrl(body, emp.id);
 
       const { data: newShift } = await supabase
         .from("attendance_shifts")
@@ -295,13 +320,21 @@ serve(async (req: Request) => {
 
       const clockOutId = crypto.randomUUID();
 
+      // NOTE: the mobile app already sends an end-of-shift selfie (selfie_base64) on
+      // clock-out, but attendance_shifts has no column to store it separately from the
+      // shift-start selfie yet (adding `end_selfie_url` requires a schema migration that
+      // needs sign-off before touching this live table) -- so it is not captured here
+      // yet. `compliance_flag` IS an existing column and IS updated below so the
+      // geofence badge reflects this clock-out's own location check (the "latest today
+      // selfie") rather than staying frozen at the clock-in's result.
       const { data: updatedShift } = await supabase
         .from("attendance_shifts")
         .update({
           status: "COMPLETED",
           clock_out_event_id: clockOutId,
           clock_out_time: nowIso,
-          total_worked_minutes: 480
+          total_worked_minutes: 480,
+          compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW"
         })
         .eq("employee_id", emp.id)
         .eq("status", "OPEN")
