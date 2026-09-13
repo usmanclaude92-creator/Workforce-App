@@ -121,7 +121,7 @@ class SupabaseAttendanceVerificationService(
 
         var isStoredInSupabase = false
         var serverTimestamp: String? = null
-        var responseMessage = "Biometric selfie verification entry saved in Supabase database."
+        var responseMessage = "Biometric selfie verification entry saved."
 
         // Attempt 1: Call Supabase Edge Function 'attendance-verify'
         try {
@@ -141,7 +141,7 @@ class SupabaseAttendanceVerificationService(
                 val tableResp = api.recordAttendanceVerificationTable(ArtifyBackendConfig.ATTENDANCE_VERIFICATIONS_URL, authHeader, "return=minimal", entry)
                 if (tableResp.isSuccessful) {
                     isStoredInSupabase = true
-                    responseMessage = "Verification entry successfully created in Supabase 'attendance_verifications' table."
+                    responseMessage = "Verification entry successfully created."
                 }
             } catch (e: Exception) {
                 Log.d("SupabaseVerification", "PostgREST table insert skipped/failed: ${e.message}")
@@ -185,7 +185,7 @@ class SupabaseAttendanceVerificationService(
             com.example.data.sync.AttendanceSyncWorker.enqueueOneTimeWork(context)
             AttendanceVerificationResult.OfflineQueued(
                 entryId = entryId,
-                message = "Biometric metadata verified and saved to local secure cache. Synchronizing with Supabase database as connection permits."
+                message = "Biometric metadata verified and saved to local secure cache. Synchronizing as connection permits."
             )
         }
     }

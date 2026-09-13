@@ -269,7 +269,7 @@ fun SelfieVerificationComponent(
         val metadata = extractedMetadata
         if (bitmap != null && metadata != null && !isStoringInSupabase) {
             isStoringInSupabase = true
-            statusMessage = "Connecting to Supabase and logging attendance verification..."
+            statusMessage = "Connecting and logging attendance verification..."
 
             coroutineScope.launch {
                 val tempFile = withContext(Dispatchers.IO) {
@@ -343,7 +343,7 @@ fun SelfieVerificationComponent(
                         onVerificationComplete(createdEntry)
                     }
                     is AttendanceVerificationResult.Failure -> {
-                        statusMessage = "Supabase storage error: ${result.errorMessage}"
+                        statusMessage = "Storage error: ${result.errorMessage}"
                     }
                 }
             }
@@ -406,7 +406,7 @@ fun SelfieVerificationComponent(
                     }
                 }
 
-                // Supabase Sync Badge
+                // Cloud Sync Badge
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Color(0xFF3ECF8E).copy(alpha = 0.14f),
@@ -424,7 +424,7 @@ fun SelfieVerificationComponent(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Supabase Sync",
+                            text = "Cloud Sync",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF3ECF8E)
@@ -836,7 +836,7 @@ fun SelfieVerificationComponent(
                             Text("Retake")
                         }
 
-                        // Store in Supabase Button
+                        // Store Button
                         Button(
                             onClick = { onStoreInSupabase() },
                             modifier = Modifier
@@ -857,7 +857,7 @@ fun SelfieVerificationComponent(
                                     strokeWidth = 2.dp
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Storing in Supabase...")
+                                Text("Storing...")
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.CloudUpload,
@@ -866,7 +866,7 @@ fun SelfieVerificationComponent(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Save in Supabase",
+                                    text = "Save",
                                     fontWeight = FontWeight.Bold
                                 )
                             }

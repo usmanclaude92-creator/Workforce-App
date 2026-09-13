@@ -354,7 +354,7 @@ class RealWorkerViewModel(
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false, activeShift = null,
                         completionLogs = listOf(completionLog) + _uiState.value.completionLogs,
-                        statusMessage = "Shift completed and logged to Supabase database."
+                        statusMessage = "Shift completed and logged."
                     )
                     refresh()
                 }
@@ -384,7 +384,7 @@ class RealWorkerViewModel(
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false, activeShift = null,
                             completionLogs = listOf(completionLog) + _uiState.value.completionLogs,
-                            statusMessage = "You're offline — shift completion queued and will sync to Supabase automatically."
+                            statusMessage = "You're offline — shift completion queued and will sync automatically."
                         )
                     } else {
                         runCatching { File(selfieFilePath).delete() }
