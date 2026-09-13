@@ -29,6 +29,23 @@ jobs:
           fi
           chmod +x gradlew
 
+      - name: Write real backend config into .env
+        # Without this, the Secrets Gradle Plugin falls back to .env.example's empty values and
+        # the resulting APK bakes in an empty SUPABASE_URL/SUPABASE_ANON_KEY -- it installs and
+        # opens, but every backend call (login, clock in/out, everything) fails. These come from
+        # repository secrets, not source, so the real values never enter git history.
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          WORKFORCE_HMAC_SIGNING_KEY: ${{ secrets.WORKFORCE_HMAC_SIGNING_KEY }}
+        run: |
+          {
+            echo "GEMINI_API_KEY="
+            echo "SUPABASE_URL=${SUPABASE_URL}"
+            echo "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
+            echo "WORKFORCE_HMAC_SIGNING_KEY=${WORKFORCE_HMAC_SIGNING_KEY}"
+          } > .env
+
       - name: Generate Debug Keystore (only if not already committed)
         # IMPORTANT: debug.keystore is committed at the repo root specifically so every CI run
         # (and every local build) signs with the SAME certificate. Regenerating it unconditionally
