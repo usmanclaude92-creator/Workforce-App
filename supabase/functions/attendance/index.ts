@@ -214,7 +214,7 @@ serve(async (req: Request) => {
           server_timestamp: dbShift.clock_out_time ?? nowIso,
           geofence_status: g.status,
           distance_from_project_meters: g.distance,
-          selfie_storage_path: "attendance-selfies/out.jpg",
+          selfie_storage_path: dbShift.end_selfie_url ?? "attendance-selfies/out.jpg",
           is_mock_location: dbShift.is_mock_location ?? false,
           device_id: "mobile-device"
         } : null,
@@ -320,13 +320,14 @@ serve(async (req: Request) => {
 
       const clockOutId = crypto.randomUUID();
 
-      // NOTE: the mobile app already sends an end-of-shift selfie (selfie_base64) on
-      // clock-out, but attendance_shifts has no column to store it separately from the
-      // shift-start selfie yet (adding `end_selfie_url` requires a schema migration that
-      // needs sign-off before touching this live table) -- so it is not captured here
-      // yet. `compliance_flag` IS an existing column and IS updated below so the
-      // geofence badge reflects this clock-out's own location check (the "latest today
-      // selfie") rather than staying frozen at the clock-in's result.
+      // The mobile app sends an end-of-shift selfie (selfie_base64) on clock-out. Stored
+      // in end_selfie_url, separate from selfie_url (the shift-start selfie), so the
+      // start selfie is never overwritten/lost when the shift ends -- both remain in
+      // history. compliance_flag is also updated here so the geofence badge reflects
+      // this clock-out's own location check (the "latest today selfie") rather than
+      // staying frozen at the clock-in's result.
+      const publicEndSelfieUrl = await resolveSelfieUrl(body, `${emp.id}_end`);
+
       const { data: updatedShift } = await supabase
         .from("attendance_shifts")
         .update({
@@ -334,7 +335,8 @@ serve(async (req: Request) => {
           clock_out_event_id: clockOutId,
           clock_out_time: nowIso,
           total_worked_minutes: 480,
-          compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW"
+          compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
+          end_selfie_url: publicEndSelfieUrl
         })
         .eq("employee_id", emp.id)
         .eq("status", "OPEN")
