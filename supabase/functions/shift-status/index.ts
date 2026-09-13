@@ -55,12 +55,24 @@ serve(async (req: Request) => {
     }
 
     for (const cid of civilIds) {
-      // Look up each employee by either civil_id OR employee_id
-      const { data: emp } = await supabase
+      // Look up strictly by civil_id. HCMS (the only caller of this function -- see
+      // hcm/server/routes/workforce.ts) deliberately sends only genuine Civil ID values,
+      // never an employee_id substitute. Matching on civil_id OR employee_id here used to
+      // let one employee's employee_id collide with a DIFFERENT employee's civil_id (both
+      // "12345678" in one real case) -- the OR then matched two rows, .maybeSingle()
+      // returned an error, and that error was silently discarded, falling through to
+      // "not linked" exactly as if no employee existed at all. A real clock-in was
+      // recorded correctly but its Employee Card on the dashboard never updated because
+      // of this, not because of any actual data-linkage problem.
+      const { data: emp, error: empErr } = await supabase
         .from("employees")
         .select("id, employee_name, employee_id, civil_id, assigned_project_id")
-        .or(`civil_id.eq.${cid},employee_id.eq.${cid}`)
+        .eq("civil_id", cid)
         .maybeSingle();
+
+      if (empErr) {
+        console.error("[shift-status] employee lookup failed for civil_id", cid, JSON.stringify(empErr));
+      }
 
       if (!emp) {
         statuses[cid] = {
