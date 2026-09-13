@@ -287,13 +287,15 @@ fun RealSupervisorDashboardScreen(
 
     if (showAssignShiftDialog) {
         val context = LocalContext.current
+        // NOTE: previously fell back to fabricated names ("Hamad Al-Sabah", "Al-Ahmadi Refinery
+        // Expansion", etc.) whenever the real roster/sites hadn't loaded yet, letting a supervisor
+        // submit a real shift assignment against a fictional employee/site. Now these lists are
+        // real-data-only or empty; AssignShiftScheduleDialog disables submission until real data exists.
         val availableWorkers: List<Pair<String, String>> = uiState.attendanceRoster.mapNotNull { it.employee }
             .filter { !it.employeeCode.isNullOrBlank() }
             .distinctBy { it.employeeCode }
-            .map { (it.employeeCode ?: "EMP-001") to it.fullName }
-            .ifEmpty { listOf("EMP-001" to "Hamad Al-Sabah", "EMP-002" to "Fatima Al-Enezi", "EMP-003" to "Tariq Mansoor") }
+            .map { it.employeeCode.orEmpty() to it.fullName }
         val availableSites = uiState.sites.map { it.name }
-            .ifEmpty { listOf("Al-Ahmadi Refinery Expansion", "Kuwait City Commercial Tower", "Shuwaikh Port Logistics Hub") }
 
         AssignShiftScheduleDialog(
             initialWorker = assignShiftWorker,
@@ -1602,14 +1604,16 @@ fun AssignShiftScheduleDialog(
     ) -> Unit
 ) {
     var isScheduleChange by remember { mutableStateOf(false) }
+    // No fabricated identity here: an empty string means "nothing real to select yet", and the
+    // Send button below is disabled until a real employee and site are chosen.
     var selectedEmployeeCode by remember {
-        mutableStateOf(initialWorker?.employee?.employeeCode ?: availableWorkers.firstOrNull()?.first ?: "EMP-001")
+        mutableStateOf(initialWorker?.employee?.employeeCode ?: availableWorkers.firstOrNull()?.first ?: "")
     }
     var selectedEmployeeName by remember {
-        mutableStateOf(initialWorker?.employee?.fullName ?: availableWorkers.firstOrNull()?.second ?: "Hamad Al-Sabah")
+        mutableStateOf(initialWorker?.employee?.fullName ?: availableWorkers.firstOrNull()?.second ?: "")
     }
     var selectedSite by remember {
-        mutableStateOf(initialWorker?.project?.name ?: availableSites.firstOrNull() ?: "Al-Ahmadi Refinery Expansion")
+        mutableStateOf(initialWorker?.project?.name ?: availableSites.firstOrNull() ?: "")
     }
     var shiftDate by remember {
         mutableStateOf(java.time.LocalDate.now().plusDays(1).toString())
@@ -1758,6 +1762,13 @@ fun AssignShiftScheduleDialog(
                     color = textSecondary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
+                if (availableWorkers.isEmpty()) {
+                    Text(
+                        text = "No roster loaded yet — wait for sync or refresh before assigning a shift.",
+                        fontSize = 11.sp,
+                        color = SophisticatedWarning
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1798,6 +1809,13 @@ fun AssignShiftScheduleDialog(
                     color = textSecondary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
+                if (availableSites.isEmpty()) {
+                    Text(
+                        text = "No sites loaded yet — wait for sync or refresh before assigning a shift.",
+                        fontSize = 11.sp,
+                        color = SophisticatedWarning
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2077,6 +2095,8 @@ fun AssignShiftScheduleDialog(
                                 specialNotes
                             )
                         },
+                        // Never submit a shift assignment against an unselected (fabricated) employee/site.
+                        enabled = selectedEmployeeCode.isNotBlank() && selectedSite.isNotBlank(),
                         shape = RoundedCornerShape(50),
                         modifier = Modifier.weight(1.6f),
                         colors = ButtonDefaults.buttonColors(

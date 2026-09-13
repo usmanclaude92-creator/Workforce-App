@@ -1719,7 +1719,7 @@ private fun ProfileTab(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "${profile?.role ?: "WORKER"} • ${profile?.department ?: "Civil Team"}",
+                            text = "${profile?.role ?: "WORKER"} • ${profile?.department ?: "—"}",
                             color = SophisticatedPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -1731,7 +1731,7 @@ private fun ProfileTab(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "ID: ${profile?.employeeCode ?: fallbackCode} • ${profile?.companyName ?: "Artify Contracting LLC"}",
+                    text = "ID: ${profile?.employeeCode ?: fallbackCode} • ${profile?.companyName ?: "—"}",
                     color = textSecondary,
                     fontSize = 12.sp
                 )
@@ -2002,9 +2002,9 @@ private fun ProfileTab(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                WorkAssignmentDetailRow(label = "Assigned Site", value = profile?.projectName ?: "Muscat Construction Site A")
-                WorkAssignmentDetailRow(label = "Project Code", value = profile?.projectCode ?: "PRJ-MUSCAT-01")
-                WorkAssignmentDetailRow(label = "Assigned Geofence", value = profile?.geofenceRadiusMeters?.let { "${it.toInt()}m Geo-radius Active" } ?: "200m Geo-radius Active")
+                WorkAssignmentDetailRow(label = "Assigned Site", value = profile?.projectName ?: "—")
+                WorkAssignmentDetailRow(label = "Project Code", value = profile?.projectCode ?: "—")
+                WorkAssignmentDetailRow(label = "Assigned Geofence", value = profile?.geofenceRadiusMeters?.let { "${it.toInt()}m Geo-radius Active" } ?: "—")
                 WorkAssignmentDetailRow(label = "Hardware Biometric ID", value = deviceId.take(18) + "…")
             }
         }
@@ -2019,10 +2019,10 @@ private fun ProfileTab(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                WorkAssignmentDetailRow("Email", profile?.email ?: "worker@artify.internal")
-                WorkAssignmentDetailRow("Phone", profile?.phone ?: "+968 9123 4567")
-                WorkAssignmentDetailRow("Department", profile?.department ?: "Civil & Structural Team")
-                WorkAssignmentDetailRow("Account Status", if (profile != null) "Active" else "Active")
+                WorkAssignmentDetailRow("Email", profile?.email ?: "—")
+                WorkAssignmentDetailRow("Phone", profile?.phone ?: "—")
+                WorkAssignmentDetailRow("Department", profile?.department ?: "—")
+                WorkAssignmentDetailRow("Account Status", if (profile != null) "Active" else "—")
             }
         }
 

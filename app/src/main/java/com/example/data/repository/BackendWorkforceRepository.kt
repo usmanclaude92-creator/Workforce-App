@@ -289,10 +289,10 @@ class BackendWorkforceRepository(
                         fullName = cachedEmp.fullName,
                         employeeCode = cachedEmp.employeeCode,
                         role = cachedEmp.role,
-                        department = "Operations & Projects",
-                        companyName = "Artify HCMS Workforce",
+                        department = null,
+                        companyName = null,
                         isDemo = cachedEmp.isDemo,
-                        projectName = "Assigned Site"
+                        projectName = null
                     )
                 )
             } else {
@@ -309,10 +309,10 @@ class BackendWorkforceRepository(
                             fullName = cachedEmp.fullName,
                             employeeCode = cachedEmp.employeeCode,
                             role = cachedEmp.role,
-                            department = "Operations & Projects",
-                            companyName = "Artify HCMS Workforce",
+                            department = null,
+                            companyName = null,
                             isDemo = cachedEmp.isDemo,
-                            projectName = "Assigned Site"
+                            projectName = null
                         )
                     )
                 } else {
@@ -328,10 +328,10 @@ class BackendWorkforceRepository(
                         fullName = cachedEmp.fullName,
                         employeeCode = cachedEmp.employeeCode,
                         role = cachedEmp.role,
-                        department = "Operations & Projects",
-                        companyName = "Artify HCMS Workforce",
+                        department = null,
+                        companyName = null,
                         isDemo = cachedEmp.isDemo,
-                        projectName = "Assigned Site"
+                        projectName = null
                     )
                 )
             } else {
