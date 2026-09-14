@@ -148,7 +148,7 @@ class BackendWorkforceRepository(
                     BackendResult.Success(
                         AttendanceVerificationResponse(
                             success = true,
-                            message = "Biometric attendance verification registered in Supabase database.",
+                            message = "Biometric attendance verification registered successfully.",
                             entry = entry
                         )
                     )

@@ -127,7 +127,7 @@ fun RealWorkerDashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Supabase DB",
+                                    text = "Cloud Sync",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = SophisticatedPrimary
@@ -878,13 +878,13 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Connected to Supabase Database",
+                        "Cloud Sync Active",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = textPrimary
                     )
                     Text(
-                        "https://jpsiafvbyupofnbqonkq.supabase.co • Shift completion logs stored",
+                        "Shift completion logs stored securely",
                         fontSize = 9.5.sp,
                         color = textMuted,
                         maxLines = 1,
@@ -960,7 +960,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("MY SHIFTS SUMMARY (${filtered.size})", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
-            Text("Supabase Cloud DB & Room DB", fontSize = 9.5.sp, color = textMuted)
+            Text("Cloud & Local Storage", fontSize = 9.5.sp, color = textMuted)
         }
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -973,7 +973,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "No records match.\nPull down to refresh shift logs from Supabase.",
+                    text = "No records match.\nPull down to refresh shift logs.",
                     fontSize = 12.sp,
                     color = textMuted,
                     textAlign = TextAlign.Center,
@@ -1086,7 +1086,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                         ) {
                                             Icon(Icons.Default.CloudDone, contentDescription = null, tint = SophisticatedSuccess, modifier = Modifier.size(11.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Stored in Supabase DB", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SophisticatedSuccess)
+                                            Text("Stored in Cloud", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SophisticatedSuccess)
                                         }
                                     }
                                     Text("Tap for details", fontSize = 9.5.sp, color = textMuted)
@@ -1151,8 +1151,7 @@ private fun AttendanceDetailDialog(shift: AttendanceShiftDto, uiState: RealWorke
                 KeyValueRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
                 KeyValueRow("Biometric Match", if (selfiePath != null) "Selfie captured & verified" else "No selfie on record")
                 KeyValueRow("Hardware Device", (shift.clockIn?.deviceId ?: shift.clockOut?.deviceId)?.take(18) ?: "Unknown")
-                KeyValueRow("Database Storage", "Supabase Database & Local Room DB")
-                KeyValueRow("Supabase Endpoint", "jpsiafvbyupofnbqonkq.supabase.co")
+                KeyValueRow("Database Storage", "Cloud Database & Local Storage")
                 KeyValueRow("Shift Completion", if (shift.clockOut != null || shift.status != "OPEN") "Logged & Synced to Cloud" else "Shift in progress")
                 shift.reviewComment?.let { KeyValueRow("Supervisor Note", it) }
 

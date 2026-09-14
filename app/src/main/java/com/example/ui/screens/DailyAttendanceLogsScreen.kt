@@ -160,7 +160,7 @@ fun DailyAttendanceLogsScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Supabase DB",
+                                text = "Cloud Sync",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = SophisticatedPrimary
@@ -221,13 +221,13 @@ fun DailyAttendanceLogsScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Connected to Supabase Database",
+                                "Cloud Sync Active",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = SophisticatedTextPrimary
                             )
                             Text(
-                                "https://jpsiafvbyupofnbqonkq.supabase.co • Shift completion logs stored",
+                                "Shift completion logs stored securely",
                                 fontSize = 10.sp,
                                 color = SophisticatedTextMuted,
                                 maxLines = 1,
