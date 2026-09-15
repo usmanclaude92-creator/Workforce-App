@@ -453,10 +453,14 @@ object AttendancePdfExporter {
             val uri = getUriForFile(context, file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/pdf")
+                clipData = android.content.ClipData.newRawUri("Attendance Report", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(Intent.createChooser(intent, "Open Attendance Report"))
+            val chooser = Intent.createChooser(intent, "Open Attendance Report").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
             Log.e(TAG, "Error opening PDF file: ${e.message}")
             Toast.makeText(context, "No PDF viewer app found on device.", Toast.LENGTH_SHORT).show()
@@ -474,9 +478,14 @@ object AttendancePdfExporter {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, subject)
                 putExtra(Intent.EXTRA_TEXT, "Attached is the monthly workforce attendance and compliance report generated from Artify Workforce Management.")
+                clipData = android.content.ClipData.newRawUri("Attendance Report", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(Intent.createChooser(intent, "Share Attendance PDF"))
+            val chooser = Intent.createChooser(intent, "Share Attendance PDF").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
             Log.e(TAG, "Error sharing PDF file: ${e.message}")
             Toast.makeText(context, "Unable to share PDF: ${e.message}", Toast.LENGTH_SHORT).show()

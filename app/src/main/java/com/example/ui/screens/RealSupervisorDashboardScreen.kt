@@ -37,6 +37,7 @@ import com.example.network.LeaveRequestDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
 import com.example.ui.components.ArtifyTopHeader
+import com.example.ui.components.ExportAttendancePdfDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealSupervisorUiState
 import com.example.ui.viewmodel.RealSupervisorViewModel
@@ -60,6 +61,7 @@ fun RealSupervisorDashboardScreen(
     var inspectShift by remember { mutableStateOf<AttendanceShiftDto?>(null) }
     var showAssignShiftDialog by remember { mutableStateOf(false) }
     var assignShiftWorker by remember { mutableStateOf<AttendanceShiftDto?>(null) }
+    var showExportPdfDialog by remember { mutableStateOf(false) }
 
     val isDark = LocalIsDarkTheme.current
     val screenBg = if (isDark) SophisticatedDarkBg else SophisticatedLightBg
@@ -168,6 +170,52 @@ fun RealSupervisorDashboardScreen(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 MetricsBar(uiState.metrics)
+
+                // Quick Actions Bar for Supervisor (PDF Export & Current Tab Header)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = when (tab) {
+                            SupTab.APPROVALS -> "Shift Approvals"
+                            SupTab.ROSTER -> "Workforce Roster"
+                            SupTab.LEAVE -> "Leave Requests"
+                            SupTab.SITES -> "Active Sites"
+                            SupTab.AUDIT -> "Audit & ERP"
+                        },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+                    )
+
+                    Button(
+                        onClick = { showExportPdfDialog = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SophisticatedPrimary,
+                            contentColor = SophisticatedOnPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("btn_monthly_pdf_report")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PictureAsPdf,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Monthly PDF Report",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 Box(modifier = Modifier.weight(1f)) {
                     when (tab) {
                         SupTab.APPROVALS -> ApprovalsTab(
@@ -182,7 +230,8 @@ fun RealSupervisorDashboardScreen(
                             onOpenAssignShift = { shift ->
                                 assignShiftWorker = shift
                                 showAssignShiftDialog = true
-                            }
+                            },
+                            onOpenExportPdf = { showExportPdfDialog = true }
                         )
                         SupTab.LEAVE -> LeaveApprovalTab(
                             uiState,
@@ -253,6 +302,16 @@ fun RealSupervisorDashboardScreen(
                 }
             }
         }
+    }
+
+    if (showExportPdfDialog) {
+        ExportAttendancePdfDialog(
+            shifts = uiState.attendanceRoster,
+            sites = uiState.sites,
+            supervisorName = supervisorName,
+            supervisorCode = supervisorCode,
+            onDismiss = { showExportPdfDialog = false }
+        )
     }
 
     val context = LocalContext.current
@@ -1265,7 +1324,8 @@ private fun SitesTab(sites: List<SiteDto>) {
 @Composable
 private fun RosterTab(
     uiState: RealSupervisorUiState,
-    onOpenAssignShift: (AttendanceShiftDto?) -> Unit
+    onOpenAssignShift: (AttendanceShiftDto?) -> Unit,
+    onOpenExportPdf: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var statusFilter by remember { mutableStateOf("ALL") }
@@ -1294,7 +1354,7 @@ private fun RosterTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
+                .padding(bottom = 10.dp)
                 .clickable { onOpenAssignShift(null) },
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = SophisticatedPrimaryContainer),
@@ -1342,6 +1402,65 @@ private fun RosterTab(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text("Send Alert", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Monthly Attendance PDF Report Action Banner
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp)
+                .clickable { onOpenExportPdf() },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = SophisticatedPrimary.copy(alpha = 0.12f)),
+            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(SophisticatedPrimary.copy(alpha = 0.2f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.PictureAsPdf,
+                        contentDescription = null,
+                        tint = SophisticatedPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Monthly Attendance PDF Report",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = SophisticatedPrimary
+                    )
+                    Text(
+                        text = "Generate and share certified monthly attendance summaries with geofence & biometric audit data.",
+                        fontSize = 11.sp,
+                        color = textSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onOpenExportPdf,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SophisticatedPrimary,
+                        contentColor = SophisticatedOnPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("btn_roster_export_monthly_pdf")
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Export & Share", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

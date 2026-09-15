@@ -19,12 +19,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,8 +83,27 @@ fun ArtifyTopHeader(
     notificationCount: Int = 0,
     onNotificationClick: () -> Unit = {},
     onThemeClick: (() -> Unit)? = null,
-    onBackClick: (() -> Unit)? = null
+    onBackClick: (() -> Unit)? = null,
+    onSyncClick: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isSyncing by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "sync_rotation")
+    val rotationAngle by if (isSyncing) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = LinearEasing)
+            ),
+            label = "sync_spin"
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
+
     val isDark = LocalIsDarkTheme.current
     val themePrefs = LocalThemePreferences.current
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -216,11 +238,11 @@ fun ArtifyTopHeader(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Sub-header strip with Employee ID & Role pill
+            // Sub-header strip with Employee ID on the left & Sync icon in front of Staff on the right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -236,18 +258,60 @@ fun ArtifyTopHeader(
                     )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = roleColor.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, roleColor.copy(alpha = 0.5f))
+                val triggerSync: () -> Unit = {
+                    if (!isSyncing) {
+                        isSyncing = true
+                        coroutineScope.launch {
+                            try {
+                                onSyncClick?.invoke()
+                                val db = com.example.data.AppDatabase.getInstance(context)
+                                com.example.sync.FirestoreSyncManager.getInstance(context, db).syncPendingAttendanceRecords()
+                            } catch (_: Exception) {}
+                            kotlinx.coroutines.delay(650)
+                            isSyncing = false
+                            android.widget.Toast.makeText(context, "Workforce synchronized", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = role,
-                        color = roleColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
+                    // Sync icon on header right side in front of Staff
+                    IconButton(
+                        onClick = triggerSync,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .testTag("header_sync_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = "Sync Workforce Data",
+                            tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(rotationAngle)
+                                .testTag("header_sync_icon")
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = roleColor.copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, roleColor.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .testTag("header_role_badge")
+                            .clickable(onClick = triggerSync)
+                    ) {
+                        Text(
+                            text = role,
+                            color = roleColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
         }

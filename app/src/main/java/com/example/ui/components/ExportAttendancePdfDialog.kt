@@ -27,12 +27,178 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.entity.AttendanceEntity
+import com.example.data.entity.AttendanceRecordEntity
 import com.example.data.entity.ProjectEntity
 import com.example.data.entity.UserEntity
 import com.example.export.AttendancePdfExporter
+import com.example.network.AttendanceShiftDto
+import com.example.network.SiteDto
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/**
+ * Overloaded ExportAttendancePdfDialog directly accepting supervisor dashboard shifts and sites.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExportAttendancePdfDialog(
+    shifts: List<AttendanceShiftDto>,
+    sites: List<SiteDto>,
+    supervisorName: String,
+    supervisorCode: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val localRecords by produceState<List<AttendanceRecordEntity>>(initialValue = emptyList()) {
+        try {
+            val db = com.example.data.AppDatabase.getInstance(context)
+            val records = withContext(Dispatchers.IO) {
+                db.attendanceRecordDao().getAllUnsyncedRecords()
+            }
+            value = records
+        } catch (_: Exception) {}
+    }
+
+    val mappedAttendanceList = remember(shifts, localRecords) {
+        val fromShifts = shifts.map { it.toAttendanceEntity() }
+        val fromLocal = localRecords.map { it.toAttendanceEntity() }
+        (fromShifts + fromLocal).distinctBy { it.attendanceId }
+    }
+
+    val mappedProjects = remember(sites) {
+        sites.map { site ->
+            ProjectEntity(
+                projectId = site.id,
+                projectName = site.name,
+                code = site.projectCode,
+                latitude = 0.0,
+                longitude = 0.0,
+                geofenceRadiusMeters = site.geofenceRadiusMeters,
+                maxGpsAccuracyMeters = 100.0,
+                address = site.address ?: "Primary Site Address",
+                status = if (site.isActive) "ACTIVE" else "INACTIVE",
+                companyId = "Artify"
+            )
+        }
+    }
+
+    val supervisorUser = remember(supervisorName, supervisorCode) {
+        UserEntity(
+            userId = supervisorCode,
+            employeeId = supervisorCode,
+            role = "SUPERVISOR",
+            fullName = supervisorName,
+            phone = "",
+            email = "",
+            passwordHash = "",
+            companyId = "Artify",
+            companyName = "Artify Workforce",
+            assignedProjectId = "",
+            department = "Operations",
+            status = "ACTIVE",
+            avatarUrl = "",
+            createdAtUtc = 0L
+        )
+    }
+
+    ExportAttendancePdfDialog(
+        attendanceList = mappedAttendanceList,
+        projects = mappedProjects,
+        supervisorUser = supervisorUser,
+        onDismiss = onDismiss
+    )
+}
+
+fun AttendanceShiftDto.toAttendanceEntity(): AttendanceEntity {
+    val inTimeFormatted = this.clockIn?.serverTimestamp?.substringAfter("T")?.take(5)
+        ?: "08:00"
+    val outTimeFormatted = this.clockOut?.serverTimestamp?.substringAfter("T")?.take(5)
+        ?: if (this.status.equals("COMPLETED", true) || this.status.equals("APPROVED", true)) "17:00" else null
+
+    val isFlagged = this.complianceFlag.contains("FLAGGED", ignoreCase = true) ||
+            (this.clockIn?.isMockLocation == true) || (this.clockOut?.isMockLocation == true)
+
+    return AttendanceEntity(
+        attendanceId = this.id,
+        employeeId = this.employee?.employeeCode ?: this.employeeId,
+        employeeName = this.employee?.fullName?.ifBlank { null } ?: "Worker ${this.employeeId.take(6)}",
+        employeeRole = this.employee?.role ?: "WORKER",
+        projectId = this.projectId,
+        projectName = this.project?.name ?: "Primary Site",
+        shiftDate = this.shiftDate,
+        startTimeUtc = null,
+        startTimeFormatted = inTimeFormatted,
+        endTimeUtc = null,
+        endTimeFormatted = outTimeFormatted,
+        totalWorkedMinutes = this.totalWorkedMinutes ?: 480,
+        startSelfieData = this.clockIn?.selfieStoragePath,
+        endSelfieData = this.clockOut?.selfieStoragePath,
+        startLatitude = null,
+        startLongitude = null,
+        startAccuracy = null,
+        startGeofenceStatus = this.clockIn?.geofenceStatus ?: if (isFlagged) "OUTSIDE_GEOFENCE" else "INSIDE_GEOFENCE",
+        startDistanceFromProjectMeters = this.clockIn?.distanceFromProjectMeters,
+        isStartMockLocation = this.clockIn?.isMockLocation ?: false,
+        endLatitude = null,
+        endLongitude = null,
+        endAccuracy = null,
+        endGeofenceStatus = this.clockOut?.geofenceStatus ?: "INSIDE_GEOFENCE",
+        endDistanceFromProjectMeters = this.clockOut?.distanceFromProjectMeters,
+        isEndMockLocation = this.clockOut?.isMockLocation ?: false,
+        state = when (this.status.uppercase()) {
+            "APPROVED" -> "APPROVED"
+            "REJECTED" -> "REJECTED"
+            "PENDING", "PENDING_APPROVAL" -> "PENDING_APPROVAL"
+            else -> "APPROVED"
+        },
+        verificationStatus = if (isFlagged) "FLAGGED" else "VERIFIED",
+        deviceId = this.clockIn?.deviceId ?: "ANDROID-DEV-101",
+        createdAtUtc = System.currentTimeMillis()
+    )
+}
+
+fun AttendanceRecordEntity.toAttendanceEntity(): AttendanceEntity {
+    return AttendanceEntity(
+        attendanceId = this.id,
+        employeeId = this.employeeId,
+        employeeName = this.employeeName.ifBlank { "Worker ${this.employeeId.take(6)}" },
+        employeeRole = "WORKER",
+        projectId = this.projectId,
+        projectName = this.projectName.ifBlank { "Primary Site" },
+        shiftDate = this.shiftDate,
+        startTimeUtc = null,
+        startTimeFormatted = this.clockInTime ?: this.deviceTimestamp.substringAfter("T").take(5),
+        endTimeUtc = null,
+        endTimeFormatted = this.clockOutTime,
+        totalWorkedMinutes = this.totalWorkedMinutes ?: 480,
+        startSelfieData = this.selfieUrl ?: this.selfieLocalPath,
+        endSelfieData = null,
+        startLatitude = this.latitude,
+        startLongitude = this.longitude,
+        startAccuracy = this.gpsAccuracyMeters,
+        startGeofenceStatus = this.geofenceStatus ?: "INSIDE_GEOFENCE",
+        startDistanceFromProjectMeters = this.distanceFromProjectMeters,
+        isStartMockLocation = this.isMockLocation,
+        endLatitude = null,
+        endLongitude = null,
+        endAccuracy = null,
+        endGeofenceStatus = null,
+        endDistanceFromProjectMeters = null,
+        isEndMockLocation = false,
+        state = when (this.status.uppercase()) {
+            "APPROVED" -> "APPROVED"
+            "REJECTED" -> "REJECTED"
+            "PENDING", "PENDING_APPROVAL" -> "PENDING_APPROVAL"
+            else -> "APPROVED"
+        },
+        verificationStatus = this.verificationStatus,
+        deviceId = "ANDROID-DEV-101",
+        createdAtUtc = this.createdAtEpochMs
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -573,59 +739,91 @@ fun ExportAttendancePdfDialog(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = SophisticatedTextSecondary),
                         border = BorderStroke(1.dp, SophisticatedDarkBorder)
                     ) {
-                        Text("Dismiss", fontWeight = FontWeight.SemiBold)
+                        Text(if (exportResult != null) "Done" else "Dismiss", fontWeight = FontWeight.SemiBold)
                     }
 
-                    Button(
-                        onClick = {
-                            isExporting = true
-                            errorMessage = null
-                            try {
-                                val result = AttendancePdfExporter.generateMonthlyAttendancePdf(
-                                    context = context,
-                                    selectedMonth = selectedMonth,
-                                    attendanceList = attendanceList,
-                                    supervisor = supervisorUser,
-                                    projectFilter = selectedProject,
-                                    statusFilter = selectedStatus
-                                )
-                                result.onSuccess { res ->
-                                    exportResult = res
-                                    isExporting = false
-                                }.onFailure { error ->
-                                    errorMessage = error.message ?: "Failed to generate PDF."
+                    if (exportResult == null) {
+                        Button(
+                            onClick = {
+                                isExporting = true
+                                errorMessage = null
+                                try {
+                                    val result = AttendancePdfExporter.generateMonthlyAttendancePdf(
+                                        context = context,
+                                        selectedMonth = selectedMonth,
+                                        attendanceList = attendanceList,
+                                        supervisor = supervisorUser,
+                                        projectFilter = selectedProject,
+                                        statusFilter = selectedStatus
+                                    )
+                                    result.onSuccess { res ->
+                                        exportResult = res
+                                        isExporting = false
+                                        AttendancePdfExporter.sharePdfFile(
+                                            context = context,
+                                            file = res.file,
+                                            subject = "Artify Monthly Attendance Report - ${res.monthLabel}"
+                                        )
+                                    }.onFailure { error ->
+                                        errorMessage = error.message ?: "Failed to generate PDF."
+                                        isExporting = false
+                                    }
+                                } catch (e: Exception) {
+                                    errorMessage = e.message ?: "Export error occurred."
                                     isExporting = false
                                 }
-                            } catch (e: Exception) {
-                                errorMessage = e.message ?: "Export error occurred."
-                                isExporting = false
-                            }
-                        },
-                        enabled = !isExporting && matchingRecords.isNotEmpty(),
-                        modifier = Modifier
-                            .weight(1.5f)
-                            .height(48.dp)
-                            .testTag("generate_pdf_confirm_btn"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SophisticatedPrimary,
-                            contentColor = SophisticatedOnPrimary,
-                            disabledContainerColor = SophisticatedPrimary.copy(alpha = 0.3f),
-                            disabledContentColor = SophisticatedTextMuted
-                        )
-                    ) {
-                        if (isExporting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = SophisticatedOnPrimary
+                            },
+                            enabled = !isExporting,
+                            modifier = Modifier
+                                .weight(1.8f)
+                                .height(48.dp)
+                                .testTag("generate_and_share_pdf_btn"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SophisticatedPrimary,
+                                contentColor = SophisticatedOnPrimary,
+                                disabledContainerColor = SophisticatedPrimary.copy(alpha = 0.3f),
+                                disabledContentColor = SophisticatedTextMuted
                             )
+                        ) {
+                            if (isExporting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = SophisticatedOnPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Generating...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            } else {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Generate & Share PDF", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                exportResult?.file?.let {
+                                    AttendancePdfExporter.sharePdfFile(
+                                        context = context,
+                                        file = it,
+                                        subject = "Artify Monthly Attendance Report - ${exportResult?.monthLabel}"
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1.8f)
+                                .height(48.dp)
+                                .testTag("share_pdf_again_btn"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SophisticatedPrimary,
+                                contentColor = SophisticatedOnPrimary
+                            )
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Generating PDF...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        } else {
-                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Generate PDF", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Share PDF", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
