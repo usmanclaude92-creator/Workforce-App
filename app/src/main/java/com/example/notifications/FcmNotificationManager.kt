@@ -165,6 +165,75 @@ object FcmNotificationManager {
      */
     fun dispatchAttendanceApprovalPushNotification(
         context: Context,
+        shiftId: String,
+        employeeId: String,
+        employeeName: String,
+        shiftDate: String,
+        supervisorName: String,
+        isApproved: Boolean,
+        commentOrReason: String? = null
+    ) {
+        val title = if (isApproved) "✅ Shift Attendance Approved" else "❌ Shift Attendance Rejected"
+        val statusText = if (isApproved) "APPROVED" else "REJECTED"
+        val body = if (isApproved) {
+            "Your shift attendance on $shiftDate was approved by $supervisorName." +
+                (if (!commentOrReason.isNullOrBlank()) " Note: $commentOrReason" else "")
+        } else {
+            "Your shift attendance on $shiftDate was rejected by $supervisorName. Reason: ${commentOrReason ?: "Not specified"}"
+        }
+
+        val notificationId = "NOTIF-PUSH-" + UUID.randomUUID().toString().take(8)
+
+        val payload = hashMapOf(
+            "notificationId" to notificationId,
+            "recipientId" to employeeId,
+            "employeeName" to employeeName,
+            "title" to title,
+            "body" to body,
+            "type" to "ATTENDANCE",
+            "status" to statusText,
+            "attendanceId" to shiftId,
+            "shiftDate" to shiftDate,
+            "supervisorName" to supervisorName,
+            "timestampUtc" to System.currentTimeMillis(),
+            "fcmTopic" to "employee_${employeeId.lowercase()}",
+            "delivered" to true
+        )
+
+        try {
+            firestore?.collection("fcm_notifications")
+                ?.document(notificationId)
+                ?.set(payload, SetOptions.merge())
+                ?.addOnSuccessListener {
+                    Log.d(TAG, "FCM attendance notification record dispatched to Firestore: $notificationId")
+                }
+                ?.addOnFailureListener { e ->
+                    Log.w(TAG, "Error storing FCM attendance record to Firestore: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore FCM dispatch skipped: ${e.message}")
+        }
+
+        // Display immediate high-priority Heads-up Notification on device
+        showSystemNotification(
+            context = context,
+            title = title,
+            body = body,
+            notificationId = shiftId.hashCode(),
+            extraData = mapOf(
+                "attendanceId" to shiftId,
+                "type" to "ATTENDANCE",
+                "status" to statusText,
+                "employeeId" to employeeId
+            )
+        )
+    }
+
+    /**
+     * Dispatches an automated push notification to the employee when their attendance record is reviewed/approved by a supervisor.
+     */
+    fun dispatchAttendanceApprovalPushNotification(
+        context: Context,
         attendance: com.example.data.entity.AttendanceEntity,
         supervisor: UserEntity,
         isApproved: Boolean,
@@ -359,6 +428,70 @@ object FcmNotificationManager {
                 "employeeId" to employee.employeeId,
                 "employeeName" to employee.fullName,
                 "target_screen" to "SUPERVISOR_LEAVE"
+            )
+        )
+    }
+
+    /**
+     * Dispatches an automated high-priority push notification to Project Supervisors when a worker submits attendance.
+     */
+    fun dispatchNewAttendancePendingAlertToSupervisors(
+        context: Context,
+        shiftId: String,
+        employeeName: String,
+        employeeCode: String,
+        projectName: String,
+        shiftDate: String
+    ) {
+        val title = "🔔 Attendance Pending Review: $employeeName"
+        val body = "$employeeName ($employeeCode) submitted shift attendance for $projectName on $shiftDate. Tap to review and approve."
+        val notificationId = "NOTIF-SUP-ATT-" + UUID.randomUUID().toString().take(8)
+
+        val payload = hashMapOf(
+            "notificationId" to notificationId,
+            "recipientId" to "ALL_SUPERVISORS",
+            "employeeId" to employeeCode,
+            "employeeName" to employeeName,
+            "title" to title,
+            "body" to body,
+            "type" to "ATTENDANCE_PENDING",
+            "status" to "PENDING",
+            "shiftId" to shiftId,
+            "projectName" to projectName,
+            "shiftDate" to shiftDate,
+            "timestampUtc" to System.currentTimeMillis(),
+            "fcmTopic" to "all_supervisors",
+            "priority" to "HIGH",
+            "delivered" to true
+        )
+
+        try {
+            firestore?.collection("fcm_notifications")
+                ?.document(notificationId)
+                ?.set(payload, SetOptions.merge())
+                ?.addOnSuccessListener {
+                    Log.d(TAG, "Supervisor FCM attendance notification dispatched to Firestore topic 'all_supervisors': $notificationId")
+                }
+                ?.addOnFailureListener { e ->
+                    Log.w(TAG, "Error storing Supervisor FCM record to Firestore: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore supervisor FCM dispatch skipped: ${e.message}")
+        }
+
+        // Display immediate high-priority Heads-up Notification on device
+        showSystemNotification(
+            context = context,
+            title = title,
+            body = body,
+            notificationId = shiftId.hashCode(),
+            channelId = CHANNEL_ID_SUPERVISOR_ALERTS,
+            extraData = mapOf(
+                "shiftId" to shiftId,
+                "type" to "ATTENDANCE_PENDING",
+                "employeeId" to employeeCode,
+                "employeeName" to employeeName,
+                "target_screen" to "SUPERVISOR_APPROVALS"
             )
         )
     }

@@ -39,6 +39,9 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         val type = data["type"] ?: "SYSTEM"
+        val isSupervisorAttendanceAlert = type == "ATTENDANCE_PENDING" ||
+            data["type"] == "ATTENDANCE_PENDING" ||
+            title?.contains("Attendance Pending", ignoreCase = true) == true
         val isSupervisorLeaveAlert = type == "LEAVE_REQUEST" ||
             data["recipientId"] == "ALL_SUPERVISORS" ||
             remoteMessage.from?.contains("all_supervisors") == true ||
@@ -55,6 +58,7 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
 
         if (title.isNullOrBlank()) {
             title = when {
+                isSupervisorAttendanceAlert -> "🔔 Attendance Pending Review"
                 isSupervisorLeaveAlert -> "🔔 New Leave Request"
                 type == "SCHEDULE_CHANGE" -> "⚠️ Schedule Change Alert"
                 isShiftOrScheduleAlert -> "📅 New Shift Assignment"
@@ -69,8 +73,9 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
         val notificationIntId = rawNotifId.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) }
 
         // 2. Persist to Room local database so it displays in notification drawer / badge counters
-        val recipientId = data["recipientId"] ?: (if (isSupervisorLeaveAlert) "ALL_SUPERVISORS" else data["employeeId"] ?: "ALL")
+        val recipientId = data["recipientId"] ?: (if (isSupervisorLeaveAlert || isSupervisorAttendanceAlert) "ALL_SUPERVISORS" else data["employeeId"] ?: "ALL")
         val localType = when {
+            isSupervisorAttendanceAlert -> "ATTENDANCE_PENDING"
             isSupervisorLeaveAlert -> "LEAVE"
             isShiftOrScheduleAlert -> "SHIFT"
             else -> type
@@ -124,13 +129,15 @@ class ArtifyFirebaseMessagingService : FirebaseMessagingService() {
 
         // 3. Select appropriate notification channel (Supervisor alerts, Shift/Schedule alerts, or standard workforce)
         val channelId = when {
-            isSupervisorLeaveAlert -> FcmNotificationManager.CHANNEL_ID_SUPERVISOR_ALERTS
+            isSupervisorLeaveAlert || isSupervisorAttendanceAlert -> FcmNotificationManager.CHANNEL_ID_SUPERVISOR_ALERTS
             isShiftOrScheduleAlert -> FcmNotificationManager.CHANNEL_ID_SHIFT_SCHEDULE
             else -> FcmNotificationManager.CHANNEL_ID_WORKFORCE
         }
 
         val enrichedData = HashMap(data).apply {
-            if (isSupervisorLeaveAlert && !containsKey("target_screen")) {
+            if (isSupervisorAttendanceAlert && !containsKey("target_screen")) {
+                put("target_screen", "SUPERVISOR_APPROVALS")
+            } else if (isSupervisorLeaveAlert && !containsKey("target_screen")) {
                 put("target_screen", "SUPERVISOR_LEAVE")
             } else if (isShiftOrScheduleAlert && !containsKey("target_screen")) {
                 put("target_screen", "WORKER_SHIFT")

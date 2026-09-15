@@ -106,7 +106,7 @@ serve(async (req: Request) => {
         .order("created_at", { ascending: true });
 
       const shifts = todayShifts ?? [];
-      const openShift = shifts.find((s: any) => s.status === "OPEN" || s.status === "IN_PROGRESS");
+      const openShift = shifts.find((s: any) => s.status === "OPEN" || s.status === "IN_PROGRESS" || s.status === "PENDING");
       const completedShifts = shifts.filter((s: any) => s.status === "COMPLETED" || s.status === "CLOSED");
 
       let todayCompletedMinutes = 0;

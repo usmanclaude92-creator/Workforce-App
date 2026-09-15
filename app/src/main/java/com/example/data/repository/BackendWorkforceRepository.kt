@@ -246,8 +246,10 @@ class BackendWorkforceRepository(
         return try {
             val response = api.pendingAttendance(auth, SupervisorActionRequest(action = "pending_attendance"))
             val body = response.body()
-            if (!response.isSuccessful || body?.shifts == null) BackendResult.Failure(body?.error ?: "Failed to load pending approvals.")
-            else BackendResult.Success(body.shifts)
+            if (!response.isSuccessful || body?.shifts == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load pending approvals."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.shifts)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }
@@ -261,8 +263,10 @@ class BackendWorkforceRepository(
                 SupervisorActionRequest(action = "review_attendance", shiftId = shiftId, decision = if (approve) "APPROVED" else "REJECTED", comment = comment)
             )
             val body = response.body()
-            if (!response.isSuccessful || body?.shift == null) BackendResult.Failure(body?.error ?: "Failed to update attendance.")
-            else BackendResult.Success(body.shift)
+            if (!response.isSuccessful || body?.shift == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to update attendance."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.shift)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }
@@ -273,8 +277,10 @@ class BackendWorkforceRepository(
         return try {
             val response = api.pendingLeave(auth, SupervisorActionRequest(action = "pending_leave"))
             val body = response.body()
-            if (!response.isSuccessful || body?.leaveRequests == null) BackendResult.Failure(body?.error ?: "Failed to load pending leave.")
-            else BackendResult.Success(body.leaveRequests)
+            if (!response.isSuccessful || body?.leaveRequests == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load pending leave."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.leaveRequests)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }
@@ -288,8 +294,10 @@ class BackendWorkforceRepository(
                 SupervisorActionRequest(action = "review_leave", leaveId = leaveId, decision = if (approve) "APPROVED" else "REJECTED", comment = comment)
             )
             val body = response.body()
-            if (!response.isSuccessful || body?.leaveRequest == null) BackendResult.Failure(body?.error ?: "Failed to update leave request.")
-            else BackendResult.Success(body.leaveRequest)
+            if (!response.isSuccessful || body?.leaveRequest == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to update leave request."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.leaveRequest)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }
@@ -300,8 +308,10 @@ class BackendWorkforceRepository(
         return try {
             val response = api.myNotifications(auth, ActionRequest("my_notifications"))
             val body = response.body()
-            if (!response.isSuccessful || body?.notifications == null) BackendResult.Failure(body?.error ?: "Failed to load notifications.")
-            else BackendResult.Success(body.notifications)
+            if (!response.isSuccessful || body?.notifications == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load notifications."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.notifications)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }

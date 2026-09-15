@@ -16,6 +16,7 @@ import com.example.network.LeaveRequestDto
 import com.example.network.NotificationDto
 import com.example.network.ProfileDto
 import com.example.network.ShiftCompletionLog
+import com.example.notifications.FcmNotificationManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -287,10 +288,22 @@ class RealWorkerViewModel(
                 is BackendResult.Success -> {
                     val shift = result.value.shift
                     runCatching { File(selfieFilePath).delete() }
+                    shift?.let { s ->
+                        runCatching {
+                            FcmNotificationManager.dispatchNewAttendancePendingAlertToSupervisors(
+                                context = locationHelper.context,
+                                shiftId = s.id,
+                                employeeName = _uiState.value.profile?.fullName ?: s.employee?.fullName ?: "Worker",
+                                employeeCode = _uiState.value.profile?.employeeCode ?: s.employee?.employeeCode ?: employeeId,
+                                projectName = s.project?.name ?: _uiState.value.profile?.projectName ?: "Assigned Site",
+                                shiftDate = s.shiftDate
+                            )
+                        }
+                    }
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         activeShift = shift,
-                        statusMessage = "Shift started."
+                        statusMessage = "Attendance recorded and submitted for supervisor approval."
                     )
                 }
                 is BackendResult.Failure -> {

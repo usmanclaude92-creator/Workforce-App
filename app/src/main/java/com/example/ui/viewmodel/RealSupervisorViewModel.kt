@@ -104,12 +104,30 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
         }
     }
 
-    fun reviewAttendance(shiftId: String, approve: Boolean, comment: String?) {
+    fun reviewAttendance(shiftId: String, approve: Boolean, comment: String?, context: Context? = null, supervisorName: String? = null) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
             when (val result = repository.reviewAttendance(shiftId, approve, comment)) {
                 is BackendResult.Success -> {
-                    _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = if (approve) "Attendance approved." else "Attendance rejected.")
+                    val shift = result.value
+                    if (context != null) {
+                        runCatching {
+                            FcmNotificationManager.dispatchAttendanceApprovalPushNotification(
+                                context = context,
+                                shiftId = shift.id,
+                                employeeId = shift.employeeId,
+                                employeeName = shift.employee?.fullName ?: "Employee",
+                                shiftDate = shift.shiftDate,
+                                supervisorName = supervisorName ?: "Supervisor",
+                                isApproved = approve,
+                                commentOrReason = comment
+                            )
+                        }
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        isProcessing = false,
+                        statusMessage = if (approve) "Attendance approved." else "Attendance rejected."
+                    )
                     refresh()
                 }
                 is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)

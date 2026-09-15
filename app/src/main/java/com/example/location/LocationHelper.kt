@@ -34,7 +34,7 @@ data class GeofenceValidationResult(
     val message: String
 )
 
-class LocationHelper(private val context: Context) {
+class LocationHelper(val context: Context) {
 
     private val fusedClient: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)

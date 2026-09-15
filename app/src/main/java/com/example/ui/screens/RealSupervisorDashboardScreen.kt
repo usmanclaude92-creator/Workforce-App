@@ -244,6 +244,8 @@ fun RealSupervisorDashboardScreen(
         }
     }
 
+    val context = LocalContext.current
+
     rejectDialogFor?.let { (id, isAttendance) ->
         MandatoryReasonPrompt(
             title = if (isAttendance) "Reject Shift Attendance" else "Reject Leave Request",
@@ -253,7 +255,7 @@ fun RealSupervisorDashboardScreen(
                 "Document the official reason for leave rejection:",
             onDismiss = { rejectDialogFor = null },
             onConfirm = { reason ->
-                if (isAttendance) viewModel.reviewAttendance(id, false, reason)
+                if (isAttendance) viewModel.reviewAttendance(id, false, reason, context, supervisorName)
                 else viewModel.reviewLeave(id, false, reason)
                 rejectDialogFor = null
             }
@@ -263,7 +265,7 @@ fun RealSupervisorDashboardScreen(
         ApproveCommentPrompt(
             onDismiss = { approveDialogForShift = null },
             onConfirm = { comment ->
-                viewModel.reviewAttendance(shiftId, true, comment)
+                viewModel.reviewAttendance(shiftId, true, comment, context, supervisorName)
                 approveDialogForShift = null
             }
         )

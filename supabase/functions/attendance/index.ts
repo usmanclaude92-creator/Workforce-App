@@ -199,11 +199,11 @@ serve(async (req: Request) => {
         clock_in_event_id: dbShift.clock_in_event_id ?? crypto.randomUUID(),
         clock_out_event_id: isCompleted ? (dbShift.clock_out_event_id ?? crypto.randomUUID()) : null,
         total_worked_minutes: dbShift.total_worked_minutes ?? (isCompleted ? 480 : null),
-        status: dbShift.status,
+        status: dbShift.status ?? "PENDING",
         compliance_flag: g.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
-        reviewed_by: null,
-        reviewed_at: null,
-        review_comment: null,
+        reviewed_by: dbShift.reviewed_by ?? null,
+        reviewed_at: dbShift.reviewed_at ?? null,
+        review_comment: dbShift.review_comment ?? null,
         clock_in: {
           server_timestamp: dbShift.clock_in_time ?? nowIso,
           geofence_status: g.status,
@@ -280,23 +280,68 @@ serve(async (req: Request) => {
         .insert({
           id: shiftId,
           employee_id: emp.id,
-          project_id: projectCode,
+          project_id: emp.assigned_project_id ?? projectCode,
           shift_date: today,
           clock_in_event_id: clockInId,
-          status: "OPEN",
-          // The actual compliant/non-compliant result lives in compliance_flag (a real
-          // column on this table) -- attendance_shifts has no is_geofence_exception
-          // column at all. Writing it here used to make PostgREST reject the whole
-          // insert with a schema-cache error ("Could not find the 'is_geofence_exception'
-          // column..."), which is exactly what surfaced as "Could not save clock-in" /
-          // "Workforce server is temporarily unavailable" once the silent-failure bug
-          // above was fixed -- every real clock-in was failing this way.
+          status: "PENDING",
           compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
           clock_in_time: nowIso,
           selfie_url: publicSelfieUrl
         })
         .select()
         .single();
+
+      // Trigger automatic supervisor notification for the assigned project
+      try {
+        const projectIdForSup = emp.assigned_project_id ?? projectCode;
+        const supervisorIds: string[] = [];
+
+        // Check project record
+        const { data: projRecord } = await supabase
+          .from("projects")
+          .select("id, supervisor_id, manager_id")
+          .or(`id.eq.${projectIdForSup},project_code.eq.${projectCode}`)
+          .maybeSingle();
+        if (projRecord?.supervisor_id) supervisorIds.push(String(projRecord.supervisor_id));
+        if (projRecord?.manager_id) supervisorIds.push(String(projRecord.manager_id));
+
+        // Check project_supervisors table
+        const { data: psRecords } = await supabase
+          .from("project_supervisors")
+          .select("supervisor_id")
+          .eq("is_active", true)
+          .or(`project_id.eq.${projectIdForSup},project_code.eq.${projectCode}`);
+        if (Array.isArray(psRecords)) {
+          for (const r of psRecords) {
+            if (r.supervisor_id) supervisorIds.push(String(r.supervisor_id));
+          }
+        }
+
+        // Check supervisor employees assigned to this project
+        const { data: supEmployees } = await supabase
+          .from("employees")
+          .select("id")
+          .eq("assigned_project_id", projectIdForSup)
+          .in("employee_type", ["SUPERVISOR", "MANAGER", "supervisor", "manager"]);
+        if (Array.isArray(supEmployees)) {
+          for (const s of supEmployees) {
+            if (s.id) supervisorIds.push(String(s.id));
+          }
+        }
+
+        const uniqueSupervisors = Array.from(new Set(supervisorIds.filter(Boolean)));
+        for (const sId of uniqueSupervisors) {
+          await supabase.from("notifications").insert({
+            recipient_id: sId,
+            type: "ATTENDANCE_PENDING",
+            title: `🔔 Pending Attendance: ${emp.employee_name}`,
+            message: `${emp.employee_name} submitted attendance for ${projectName} on ${today}. Tap to review and approve.`,
+            created_at: nowIso
+          });
+        }
+      } catch (_notifErr) {
+        // Notification dispatch optional; do not fail clock-in
+      }
 
       // A failed insert must never look like a successful clock-in. Previously this
       // fell back to a synthesized-in-memory shift object and still returned 200 --
@@ -411,6 +456,71 @@ serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ shifts: shiftsList, error: null }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Handle "my_notifications"
+    if (action === "my_notifications") {
+      const notifsList: any[] = [];
+
+      // 1. Fetch from notifications table if available
+      try {
+        const { data: dbNotifs } = await supabase
+          .from("notifications")
+          .select("id, type, title, message, created_at")
+          .or(`recipient_id.eq.${emp.id},recipient_id.eq.${emp.employee_id},recipient_id.eq.ALL`)
+          .order("created_at", { ascending: false })
+          .limit(25);
+
+        if (Array.isArray(dbNotifs)) {
+          for (const n of dbNotifs) {
+            notifsList.push({
+              id: n.id || crypto.randomUUID(),
+              type: n.type || "SYSTEM",
+              title: n.title || "Notification",
+              message: n.message || "",
+              timestamp: n.created_at || new Date().toISOString()
+            });
+          }
+        }
+      } catch (_e) {
+        // Ignore table errors
+      }
+
+      // 2. Fetch reviewed attendance shifts to ensure worker always sees their approvals / rejections
+      try {
+        const { data: reviewedShifts } = await supabase
+          .from("attendance_shifts")
+          .select("id, shift_date, status, review_comment, reviewed_by, reviewed_at")
+          .eq("employee_id", emp.id)
+          .not("reviewed_at", "is", null)
+          .order("reviewed_at", { ascending: false })
+          .limit(10);
+
+        if (Array.isArray(reviewedShifts)) {
+          for (const s of reviewedShifts) {
+            const isApproved = s.status === "APPROVED";
+            const shiftNotifId = `notif-shift-${s.id}`;
+            if (!notifsList.some((n: any) => n.id === shiftNotifId)) {
+              notifsList.push({
+                id: shiftNotifId,
+                type: "ATTENDANCE",
+                title: isApproved ? "✅ Shift Attendance Approved" : "❌ Shift Attendance Rejected",
+                message: isApproved
+                  ? `Your attendance on ${s.shift_date} was approved${s.reviewed_by ? ` by ${s.reviewed_by}` : ""}.${s.review_comment ? ` Note: ${s.review_comment}` : ""}`
+                  : `Your attendance on ${s.shift_date} was rejected${s.reviewed_by ? ` by ${s.reviewed_by}` : ""}. Reason: ${s.review_comment || "Not specified"}`,
+                timestamp: s.reviewed_at || new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (_e) {
+        // Ignore
+      }
+
+      return new Response(
+        JSON.stringify({ notifications: notifsList, error: null }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

@@ -2,6 +2,11 @@
 
 IMPORTANT: Follow this rule for every instruction and task in this project.
 
+## Permanent Rule: Do Not Change Previous Logic and Codes Without Explicit Permission
+- You are STRICTLY FORBIDDEN from deleting, replacing, rewriting, or altering existing code, features, business logic, endpoints, or workflows unless the user explicitly asks you to change that specific piece of logic.
+- Always preserve all previous implementations, existing functions, and intact logic.
+- Any requested addition must be strictly additive and must never break or modify existing code without explicit user permission.
+
 When I ask you to change, fix, improve, test, or add something in a specific section, module, page, feature, component, or workflow:
 
 1. Do NOT inspect, scan, analyze, index, or understand the entire application/codebase.
