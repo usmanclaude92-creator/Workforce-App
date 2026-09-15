@@ -91,4 +91,13 @@ interface SupabaseApi {
 
     @POST("supervisor")
     suspend fun supervisorMetrics(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<SupervisorMetricsDto>
+
+    @POST("supervisor")
+    suspend fun pendingAttendanceApprovals(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<PendingAttendanceApprovalsResponse>
+
+    @POST("supervisor")
+    suspend fun updateAttendanceApproval(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<UpdateAttendanceApprovalResponse>
+
+    @POST("attendance")
+    suspend fun myAttendanceApprovals(@Header("Authorization") bearerToken: String, @Body request: ActionRequest): Response<PendingAttendanceApprovalsResponse>
 }

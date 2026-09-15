@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.network.AttendanceApprovalDto
 import com.example.network.AttendanceEventResponse
 import com.example.network.AttendanceShiftDto
 import com.example.network.AttendanceVerificationEntry
@@ -91,4 +92,14 @@ interface IWorkforceRepository {
     suspend fun roster(): BackendResult<List<RosterEmployeeDto>>
 
     suspend fun attendanceRoster(): BackendResult<List<AttendanceShiftDto>>
+
+    suspend fun pendingAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>>
+
+    suspend fun updateAttendanceApprovalStatus(
+        shiftId: String,
+        decision: String,
+        comment: String?
+    ): BackendResult<AttendanceApprovalDto>
+
+    suspend fun myAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>>
 }

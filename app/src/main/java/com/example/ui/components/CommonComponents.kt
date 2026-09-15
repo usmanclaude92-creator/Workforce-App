@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -78,7 +79,8 @@ fun ArtifyTopHeader(
     onAvatarClick: (() -> Unit)? = null,
     notificationCount: Int = 0,
     onNotificationClick: () -> Unit = {},
-    onThemeClick: (() -> Unit)? = null
+    onThemeClick: (() -> Unit)? = null,
+    onBackClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val themePrefs = LocalThemePreferences.current
@@ -114,6 +116,21 @@ fun ArtifyTopHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onBackClick != null) {
+                        IconButton(
+                            onClick = onBackClick,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("header_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
                     Image(
                         painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.artify_logo_mark),
                         contentDescription = null,
@@ -199,72 +216,38 @@ fun ArtifyTopHeader(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Sub-header strip with Role pill & Authoritative server handshake
+            // Sub-header strip with Employee ID & Role pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = "ID: $employeeId",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = roleColor.copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, roleColor.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = role,
-                            color = roleColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
+                    Text(
+                        text = "ID: $employeeId",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
                 }
 
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = (if (isDark) SophisticatedSuccess else SophisticatedLightSuccess).copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        (if (isDark) SophisticatedSuccess else SophisticatedLightSuccess).copy(alpha = 0.35f)
-                    )
+                    color = roleColor.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, roleColor.copy(alpha = 0.5f))
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (isDark) SophisticatedSuccess else SophisticatedLightSuccess)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "SERVER AUTHORITATIVE",
-                            color = if (isDark) SophisticatedSuccess else SophisticatedLightSuccess,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
+                    Text(
+                        text = role,
+                        color = roleColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
                 }
             }
         }
@@ -564,32 +547,33 @@ fun SelfieCaptureDialog(
 @Composable
 fun AttendanceStatusBadge(state: String) {
     val isDark = LocalIsDarkTheme.current
-    val (bg, fg, border, label) = when (state) {
-        AttendanceState.APPROVED.name -> Quadruple(
+    val normalized = state.uppercase().trim()
+    val (bg, fg, border, label) = when {
+        normalized == "APPROVED" || normalized == AttendanceState.APPROVED.name -> Quadruple(
             if (isDark) SophisticatedSuccessContainer else SophisticatedLightSuccessContainer,
             if (isDark) SophisticatedSuccess else SophisticatedLightSuccess,
             if (isDark) SophisticatedSuccessBorder else SophisticatedLightSuccessBorder,
             "Approved"
         )
-        AttendanceState.PENDING_APPROVAL.name -> Quadruple(
-            if (isDark) SophisticatedWarningContainer else SophisticatedLightWarningContainer,
-            if (isDark) SophisticatedWarning else SophisticatedLightWarning,
-            (if (isDark) SophisticatedWarning else SophisticatedLightWarning).copy(alpha = 0.4f),
-            "Pending Approval"
-        )
-        AttendanceState.REJECTED.name -> Quadruple(
+        normalized == "REJECTED" || normalized == AttendanceState.REJECTED.name -> Quadruple(
             MaterialTheme.colorScheme.errorContainer,
             MaterialTheme.colorScheme.error,
             MaterialTheme.colorScheme.error.copy(alpha = 0.4f),
             "Rejected"
         )
-        AttendanceState.FLAGGED.name -> Quadruple(
+        normalized == "PENDING" || normalized == "PENDING_APPROVAL" || normalized == AttendanceState.PENDING_APPROVAL.name -> Quadruple(
+            if (isDark) SophisticatedWarningContainer else SophisticatedLightWarningContainer,
+            if (isDark) SophisticatedWarning else SophisticatedLightWarning,
+            (if (isDark) SophisticatedWarning else SophisticatedLightWarning).copy(alpha = 0.4f),
+            "Pending"
+        )
+        normalized == AttendanceState.FLAGGED.name -> Quadruple(
             MaterialTheme.colorScheme.errorContainer,
             if (isDark) SophisticatedWarning else SophisticatedLightWarning,
             (if (isDark) SophisticatedWarning else SophisticatedLightWarning).copy(alpha = 0.4f),
             "Flagged"
         )
-        AttendanceState.SUBMITTED.name -> Quadruple(
+        normalized == AttendanceState.SUBMITTED.name -> Quadruple(
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.primary,
             MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
@@ -606,7 +590,8 @@ fun AttendanceStatusBadge(state: String) {
     Surface(
         shape = RoundedCornerShape(50),
         color = bg,
-        border = androidx.compose.foundation.BorderStroke(1.dp, border)
+        border = androidx.compose.foundation.BorderStroke(1.dp, border),
+        modifier = Modifier.testTag("attendance_badge_${label.lowercase().replace(' ', '_')}")
     ) {
         Text(
             text = label,

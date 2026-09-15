@@ -6,6 +6,7 @@ import com.example.data.AppDatabase
 import com.example.data.entity.AttendanceEntity
 import com.example.data.entity.AuditLogEntity
 import com.example.data.entity.LeaveRequestEntity
+import com.example.network.AttendanceApprovalDto
 import com.example.network.AttendanceEventResponse
 import com.example.network.AttendanceEventSummary
 import com.example.network.AttendanceShiftDto
@@ -437,6 +438,105 @@ class DemoWorkforceRepository(
     override suspend fun attendanceRoster(): BackendResult<List<AttendanceShiftDto>> {
         val list = database.attendanceDao().getAllAttendance().first()
         val dtos = list.take(30).map { it.toShiftDto(displayDateFormat, isoFormat) }
+        return BackendResult.Success(dtos)
+    }
+
+    override suspend fun pendingAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>> {
+        val list = database.attendanceDao().getPendingApprovals().first()
+        val dtos = list.map { shift ->
+            val emp = database.userDao().getUserByEmployeeId(shift.employeeId)
+            AttendanceApprovalDto(
+                id = "APPR-${shift.attendanceId.takeLast(8)}",
+                shiftId = shift.attendanceId,
+                employeeId = shift.employeeId,
+                projectId = shift.projectId,
+                supervisorId = currentEmployeeId,
+                decision = "PENDING",
+                comment = shift.supervisorComment,
+                reviewedAt = null,
+                createdAt = shift.startTimeFormatted,
+                updatedAt = null,
+                employeeName = emp?.fullName ?: "Employee",
+                employeeCode = shift.employeeId,
+                projectName = shift.projectName,
+                shiftDate = shift.shiftDate,
+                clockInTime = shift.startTimeFormatted,
+                clockOutTime = shift.endTimeFormatted,
+                totalWorkedMinutes = shift.totalWorkedMinutes,
+                complianceFlag = if (shift.verificationStatus == "FLAGGED") "FLAGGED" else "VERIFIED",
+                selfieUrl = shift.startSelfieData
+            )
+        }
+        return BackendResult.Success(dtos)
+    }
+
+    override suspend fun updateAttendanceApprovalStatus(
+        shiftId: String,
+        decision: String,
+        comment: String?
+    ): BackendResult<AttendanceApprovalDto> {
+        val shift = database.attendanceDao().getAttendanceById(shiftId)
+            ?: return BackendResult.Failure("Shift not found: $shiftId")
+
+        val now = System.currentTimeMillis()
+        val supervisor = database.userDao().getUserByEmployeeId(currentEmployeeId)
+        val isApproved = decision.equals("APPROVED", ignoreCase = true)
+
+        val updated = shift.copy(
+            state = if (isApproved) "APPROVED" else "REJECTED",
+            reviewedBySupervisorId = supervisor?.fullName ?: "Supervisor",
+            reviewedAtUtc = now,
+            supervisorComment = comment
+        )
+        database.attendanceDao().updateAttendance(updated)
+
+        val emp = database.userDao().getUserByEmployeeId(shift.employeeId)
+        val approval = AttendanceApprovalDto(
+            id = "APPR-${shift.attendanceId.takeLast(8)}",
+            shiftId = shift.attendanceId,
+            employeeId = shift.employeeId,
+            projectId = shift.projectId,
+            supervisorId = currentEmployeeId,
+            decision = if (isApproved) "APPROVED" else "REJECTED",
+            comment = comment,
+            reviewedAt = isoFormat.format(Date(now)),
+            createdAt = shift.startTimeFormatted,
+            updatedAt = isoFormat.format(Date(now)),
+            employeeName = emp?.fullName ?: "Employee",
+            employeeCode = shift.employeeId,
+            projectName = shift.projectName,
+            shiftDate = shift.shiftDate,
+            clockInTime = shift.startTimeFormatted,
+            clockOutTime = shift.endTimeFormatted,
+            totalWorkedMinutes = shift.totalWorkedMinutes,
+            complianceFlag = if (shift.verificationStatus == "FLAGGED") "FLAGGED" else "VERIFIED",
+            selfieUrl = shift.startSelfieData
+        )
+        return BackendResult.Success(approval)
+    }
+
+    override suspend fun myAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>> {
+        val list = database.attendanceDao().getAttendanceForEmployee(currentEmployeeId).first()
+        val dtos = list.map { shift ->
+            AttendanceApprovalDto(
+                id = "APPR-${shift.attendanceId.takeLast(8)}",
+                shiftId = shift.attendanceId,
+                employeeId = shift.employeeId,
+                projectId = shift.projectId,
+                supervisorId = shift.reviewedBySupervisorId,
+                decision = when (shift.state) {
+                    "APPROVED" -> "APPROVED"
+                    "REJECTED" -> "REJECTED"
+                    else -> "PENDING"
+                },
+                comment = shift.supervisorComment,
+                reviewedAt = shift.reviewedAtUtc?.let { isoFormat.format(Date(it)) },
+                shiftDate = shift.shiftDate,
+                clockInTime = shift.startTimeFormatted,
+                clockOutTime = shift.endTimeFormatted,
+                totalWorkedMinutes = shift.totalWorkedMinutes
+            )
+        }
         return BackendResult.Success(dtos)
     }
 

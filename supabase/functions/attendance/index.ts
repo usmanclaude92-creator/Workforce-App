@@ -444,20 +444,74 @@ serve(async (req: Request) => {
 
     // Handle "my_shifts"
     if (action === "my_shifts") {
-      const { data: latestShift } = await supabase
+      const { data: recentShifts } = await supabase
         .from("attendance_shifts")
         .select("*")
         .eq("employee_id", emp.id)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(30);
 
-      const shiftsList = latestShift ? [formatShiftDto(latestShift, latestShift.selfie_url)] : [];
+      const rawShifts = Array.isArray(recentShifts) ? recentShifts : [];
+      const shiftIds = rawShifts.map((s: any) => s.id);
+
+      // Fetch approvals data from attendance_approvals table
+      const approvalsMap: Record<string, any> = {};
+      if (shiftIds.length > 0) {
+        try {
+          const { data: approvals } = await supabase
+            .from("attendance_approvals")
+            .select("*")
+            .in("shift_id", shiftIds)
+            .order("reviewed_at", { ascending: false });
+
+          if (Array.isArray(approvals)) {
+            for (const a of approvals) {
+              if (!approvalsMap[a.shift_id]) {
+                approvalsMap[a.shift_id] = a;
+              }
+            }
+          }
+        } catch (_e) {}
+      }
+
+      const shiftsList = rawShifts.map((s: any) => {
+        const dto = formatShiftDto(s, s.selfie_url);
+        const appr = approvalsMap[s.id];
+        if (appr) {
+          dto.status = appr.decision; // "APPROVED", "REJECTED", "PENDING"
+          if (appr.comment) dto.review_comment = appr.comment;
+          if (appr.reviewed_at) dto.reviewed_at = appr.reviewed_at;
+        } else if (dto.status !== "OPEN" && !dto.reviewed_at) {
+          dto.status = "PENDING";
+        }
+        return dto;
+      });
 
       return new Response(
         JSON.stringify({ shifts: shiftsList, error: null }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Handle "my_attendance_approvals"
+    if (action === "my_attendance_approvals") {
+      try {
+        const { data: approvals, error: apprErr } = await supabase
+          .from("attendance_approvals")
+          .select("*")
+          .eq("employee_id", emp.id)
+          .order("created_at", { ascending: false });
+
+        return new Response(
+          JSON.stringify({ approvals: approvals || [], error: apprErr?.message ?? null }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (err: any) {
+        return new Response(
+          JSON.stringify({ approvals: [], error: err?.message ?? "Error fetching attendance approvals" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Handle "my_notifications"

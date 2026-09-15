@@ -54,6 +54,7 @@ fun RealSupervisorDashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var tab by remember { mutableStateOf(SupTab.APPROVALS) }
+    var showPendingApprovalsScreen by remember { mutableStateOf(false) }
     var rejectDialogFor by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // id, isAttendance
     var approveDialogForShift by remember { mutableStateOf<String?>(null) }
     var inspectShift by remember { mutableStateOf<AttendanceShiftDto?>(null) }
@@ -63,6 +64,15 @@ fun RealSupervisorDashboardScreen(
     val isDark = LocalIsDarkTheme.current
     val screenBg = if (isDark) SophisticatedDarkBg else SophisticatedLightBg
     val navBg = if (isDark) SophisticatedDarkNav else SophisticatedLightNav
+
+    if (showPendingApprovalsScreen) {
+        SupervisorPendingApprovalsScreen(
+            viewModel = viewModel,
+            supervisorName = supervisorName,
+            onBackClick = { showPendingApprovalsScreen = false }
+        )
+        return
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -164,7 +174,8 @@ fun RealSupervisorDashboardScreen(
                             uiState,
                             onInspect = { inspectShift = it },
                             onApprove = { approveDialogForShift = it },
-                            onReject = { rejectDialogFor = it to true }
+                            onReject = { rejectDialogFor = it to true },
+                            onOpenPendingApprovals = { showPendingApprovalsScreen = true }
                         )
                         SupTab.ROSTER -> RosterTab(
                             uiState = uiState,
@@ -255,7 +266,7 @@ fun RealSupervisorDashboardScreen(
                 "Document the official reason for leave rejection:",
             onDismiss = { rejectDialogFor = null },
             onConfirm = { reason ->
-                if (isAttendance) viewModel.reviewAttendance(id, false, reason, context, supervisorName)
+                if (isAttendance) viewModel.updateAttendanceApproval(id, false, reason, context, supervisorName)
                 else viewModel.reviewLeave(id, false, reason)
                 rejectDialogFor = null
             }
@@ -265,7 +276,7 @@ fun RealSupervisorDashboardScreen(
         ApproveCommentPrompt(
             onDismiss = { approveDialogForShift = null },
             onConfirm = { comment ->
-                viewModel.reviewAttendance(shiftId, true, comment, context, supervisorName)
+                viewModel.updateAttendanceApproval(shiftId, true, comment, context, supervisorName)
                 approveDialogForShift = null
             }
         )
@@ -555,7 +566,8 @@ private fun ApprovalsTab(
     uiState: RealSupervisorUiState,
     onInspect: (AttendanceShiftDto) -> Unit,
     onApprove: (String) -> Unit,
-    onReject: (String) -> Unit
+    onReject: (String) -> Unit,
+    onOpenPendingApprovals: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
@@ -566,6 +578,54 @@ private fun ApprovalsTab(
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        if (onOpenPendingApprovals != null) {
+            Surface(
+                onClick = onOpenPendingApprovals,
+                shape = RoundedCornerShape(12.dp),
+                color = SophisticatedPrimary.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("open_pending_approvals_screen_btn")
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.PendingActions,
+                            contentDescription = null,
+                            tint = SophisticatedPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Pending Attendance Requests Queue",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = textPrimary
+                            )
+                            Text(
+                                text = "Query attendance_approvals directly with approval actions",
+                                fontSize = 11.sp,
+                                color = textSecondary
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Open",
+                        tint = SophisticatedPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         Text(
             text = "Pending Attendance Submissions (${uiState.pendingAttendance.size})",
             fontWeight = FontWeight.Bold,

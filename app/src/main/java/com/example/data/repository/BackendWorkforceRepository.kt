@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.network.ActionRequest
+import com.example.network.AttendanceApprovalDto
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceEventRequest
 import com.example.network.AttendanceEventResponse
@@ -468,6 +469,66 @@ class BackendWorkforceRepository(
             val body = response.body()
             if (!response.isSuccessful || body?.shifts == null) BackendResult.Failure(body?.error ?: "Failed to load attendance roster.")
             else BackendResult.Success(body.shifts)
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    override suspend fun pendingAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.pendingAttendanceApprovals(auth, SupervisorActionRequest(action = "pending_attendance_approvals"))
+            val body = response.body()
+            if (!response.isSuccessful || body?.approvals == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load pending attendance approvals."
+                BackendResult.Failure(serverErr)
+            } else {
+                BackendResult.Success(body.approvals)
+            }
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    override suspend fun updateAttendanceApprovalStatus(
+        shiftId: String,
+        decision: String,
+        comment: String?
+    ): BackendResult<AttendanceApprovalDto> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.updateAttendanceApproval(
+                auth,
+                SupervisorActionRequest(
+                    action = "update_attendance_approval",
+                    shiftId = shiftId,
+                    decision = decision,
+                    comment = comment
+                )
+            )
+            val body = response.body()
+            if (!response.isSuccessful || body?.approval == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to update attendance approval status."
+                BackendResult.Failure(serverErr)
+            } else {
+                BackendResult.Success(body.approval)
+            }
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    override suspend fun myAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.myAttendanceApprovals(auth, ActionRequest(action = "my_attendance_approvals"))
+            val body = response.body()
+            if (!response.isSuccessful || body?.approvals == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load my attendance approvals."
+                BackendResult.Failure(serverErr)
+            } else {
+                BackendResult.Success(body.approvals)
+            }
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }

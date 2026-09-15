@@ -648,7 +648,7 @@ private fun ShiftDashboardTab(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "View Daily Attendance Logs (Room DB)",
+                text = "View Daily Attendance Logs",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
             )

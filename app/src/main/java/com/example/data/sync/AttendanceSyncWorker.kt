@@ -194,6 +194,13 @@ class AttendanceSyncWorker(
                         lastError = null
                     )
                 )
+                try {
+                    val recDao = com.example.data.AppDatabase.getInstance(appContext).attendanceRecordDao()
+                    val rec = recDao.getRecordByClientEventId(item.clientEventId)
+                    if (rec != null) {
+                        recDao.markAsSynced(rec.id, System.currentTimeMillis(), selfieUrl)
+                    }
+                } catch (_: Exception) {}
                 // Clean up local temp selfie file after successful cloud ingestion
                 item.selfieLocalPath?.let { path ->
                     runCatching { File(path).delete() }
@@ -214,6 +221,13 @@ class AttendanceSyncWorker(
                         nextRetryAtEpochMs = nextRetry
                     )
                 )
+                try {
+                    val recDao = com.example.data.AppDatabase.getInstance(appContext).attendanceRecordDao()
+                    val rec = recDao.getRecordByClientEventId(item.clientEventId)
+                    if (rec != null) {
+                        recDao.updateSyncFailure(rec.id, if (result.isNetworkError) "PENDING_SYNC" else "FAILED", attempts, result.message, nextRetry)
+                    }
+                } catch (_: Exception) {}
                 false
             }
         }

@@ -290,3 +290,39 @@ data class ShiftCompletionLog(
     @Json(name = "supervisor_review") val supervisorReview: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class AttendanceApprovalDto(
+    val id: String,
+    @Json(name = "shift_id") val shiftId: String,
+    @Json(name = "employee_id") val employeeId: String,
+    @Json(name = "project_id") val projectId: String? = null,
+    @Json(name = "supervisor_id") val supervisorId: String? = null,
+    val decision: String, // "PENDING", "APPROVED", "REJECTED"
+    val comment: String? = null,
+    @Json(name = "reviewed_at") val reviewedAt: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null,
+    @Json(name = "employee_name") val employeeName: String? = null,
+    @Json(name = "employee_code") val employeeCode: String? = null,
+    @Json(name = "project_name") val projectName: String? = null,
+    @Json(name = "shift_date") val shiftDate: String? = null,
+    @Json(name = "clock_in_time") val clockInTime: String? = null,
+    @Json(name = "clock_out_time") val clockOutTime: String? = null,
+    @Json(name = "total_worked_minutes") val totalWorkedMinutes: Int? = null,
+    @Json(name = "compliance_flag") val complianceFlag: String? = null,
+    @Json(name = "selfie_url") val selfieUrl: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PendingAttendanceApprovalsResponse(
+    val approvals: List<AttendanceApprovalDto>? = null,
+    val error: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateAttendanceApprovalResponse(
+    val approval: AttendanceApprovalDto? = null,
+    val shift: AttendanceShiftDto? = null,
+    val error: String? = null
+)
+

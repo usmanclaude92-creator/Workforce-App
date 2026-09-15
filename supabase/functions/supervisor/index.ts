@@ -352,19 +352,46 @@ serve(async (req: Request) => {
         });
       }
 
-      // Record in attendance_approvals if table exists
+      // Record / update in attendance_approvals table
+      let savedApprovalRecord = null;
       try {
-        await supabase
+        const { data: existingAppr } = await supabase
           .from("attendance_approvals")
-          .insert({
-            shift_id: shiftId,
-            employee_id: targetShift.employee_id,
-            project_id: targetShift.project_id,
-            supervisor_id: supervisor.id,
-            decision: decision,
-            comment: comment || null,
-            reviewed_at: nowIso
-          });
+          .select("id")
+          .eq("shift_id", shiftId)
+          .maybeSingle();
+
+        if (existingAppr?.id) {
+          const { data: updAppr } = await supabase
+            .from("attendance_approvals")
+            .update({
+              decision: decision,
+              comment: comment || null,
+              supervisor_id: supervisor.id,
+              reviewed_at: nowIso,
+              updated_at: nowIso
+            })
+            .eq("id", existingAppr.id)
+            .select("*")
+            .single();
+          savedApprovalRecord = updAppr;
+        } else {
+          const { data: insAppr } = await supabase
+            .from("attendance_approvals")
+            .insert({
+              shift_id: shiftId,
+              employee_id: targetShift.employee_id,
+              project_id: targetShift.project_id,
+              supervisor_id: supervisor.id,
+              decision: decision,
+              comment: comment || null,
+              reviewed_at: nowIso,
+              updated_at: nowIso
+            })
+            .select("*")
+            .single();
+          savedApprovalRecord = insAppr;
+        }
       } catch (_e) {
         // Table optional
       }
@@ -390,7 +417,261 @@ serve(async (req: Request) => {
       }
 
       const enriched = await enrichShifts([updatedShift]);
-      return new Response(JSON.stringify({ shift: enriched[0] ?? null, error: null }), {
+      return new Response(JSON.stringify({
+        shift: enriched[0] ?? null,
+        approval: savedApprovalRecord,
+        error: null
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ACTION: update_attendance_approval
+    // Explicit function that updates the status in attendance_approvals table based on supervisor's Approve or Reject action
+    if (action === "update_attendance_approval") {
+      const shiftId = body.shift_id;
+      const decision = (body.decision || "").toUpperCase();
+      const comment = (body.comment || "").trim();
+
+      if (!shiftId) {
+        return new Response(JSON.stringify({ error: "Missing shift_id parameter." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (decision !== "APPROVED" && decision !== "REJECTED") {
+        return new Response(JSON.stringify({ error: "Decision must be 'APPROVED' or 'REJECTED'." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (decision === "REJECTED" && !comment) {
+        return new Response(JSON.stringify({ error: "A rejection reason is required to reject attendance." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: targetShift, error: findErr } = await supabase
+        .from("attendance_shifts")
+        .select("*")
+        .eq("id", shiftId)
+        .maybeSingle();
+
+      if (findErr || !targetShift) {
+        return new Response(JSON.stringify({ error: "Attendance shift record not found." }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (allProjectIdentifiers.length > 0 && !allProjectIdentifiers.includes(String(targetShift.project_id))) {
+        return new Response(JSON.stringify({
+          error: "Permission denied: You are only authorized to review attendance for your assigned project."
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const reviewerIdentifier = supervisor.employee_name || supervisor.employee_id || supervisor.id;
+
+      // 1. Update attendance_shifts status
+      const { data: updatedShift } = await supabase
+        .from("attendance_shifts")
+        .update({
+          status: decision,
+          reviewed_by: reviewerIdentifier,
+          reviewed_at: nowIso,
+          review_comment: comment || null
+        })
+        .eq("id", shiftId)
+        .select("*")
+        .single();
+
+      // 2. Update status in attendance_approvals table
+      let savedApproval = null;
+      try {
+        const { data: existingAppr } = await supabase
+          .from("attendance_approvals")
+          .select("id")
+          .eq("shift_id", shiftId)
+          .maybeSingle();
+
+        if (existingAppr?.id) {
+          const { data: updAppr } = await supabase
+            .from("attendance_approvals")
+            .update({
+              decision: decision,
+              comment: comment || null,
+              supervisor_id: supervisor.id,
+              reviewed_at: nowIso,
+              updated_at: nowIso
+            })
+            .eq("id", existingAppr.id)
+            .select("*")
+            .single();
+          savedApproval = updAppr;
+        } else {
+          const { data: insAppr } = await supabase
+            .from("attendance_approvals")
+            .insert({
+              shift_id: shiftId,
+              employee_id: targetShift.employee_id,
+              project_id: targetShift.project_id,
+              supervisor_id: supervisor.id,
+              decision: decision,
+              comment: comment || null,
+              reviewed_at: nowIso,
+              updated_at: nowIso
+            })
+            .select("*")
+            .single();
+          savedApproval = insAppr;
+        }
+      } catch (_e) {}
+
+      // 3. Create Notification for the worker
+      try {
+        const notifTitle = decision === "APPROVED" ? "✅ Shift Attendance Approved" : "❌ Shift Attendance Rejected";
+        const notifMsg = decision === "APPROVED"
+          ? `Your attendance on ${targetShift.shift_date} was approved by ${supervisor.employee_name || "Supervisor"}.${comment ? ` Note: ${comment}` : ""}`
+          : `Your attendance on ${targetShift.shift_date} was rejected by ${supervisor.employee_name || "Supervisor"}. Reason: ${comment}`;
+
+        await supabase
+          .from("notifications")
+          .insert({
+            recipient_id: targetShift.employee_id,
+            type: "ATTENDANCE_APPROVAL",
+            title: notifTitle,
+            message: notifMsg,
+            created_at: nowIso
+          });
+      } catch (_e) {}
+
+      const enriched = updatedShift ? await enrichShifts([updatedShift]) : [];
+      return new Response(JSON.stringify({
+        approval: savedApproval ? {
+          id: savedApproval.id,
+          shift_id: savedApproval.shift_id,
+          employee_id: savedApproval.employee_id,
+          project_id: savedApproval.project_id,
+          supervisor_id: savedApproval.supervisor_id,
+          decision: savedApproval.decision,
+          comment: savedApproval.comment,
+          reviewed_at: savedApproval.reviewed_at,
+          shift_date: targetShift.shift_date
+        } : null,
+        shift: enriched[0] ?? null,
+        error: null
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ACTION: pending_attendance_approvals
+    // Queries the attendance_approvals table and returns pending attendance requests
+    if (action === "pending_attendance_approvals") {
+      // Sync any unreviewed shifts into attendance_approvals with 'PENDING'
+      try {
+        let openShiftsQuery = supabase
+          .from("attendance_shifts")
+          .select("id, employee_id, project_id, created_at")
+          .or("status.eq.PENDING,status.eq.OPEN,status.eq.COMPLETED")
+          .is("reviewed_at", null);
+
+        if (allProjectIdentifiers.length > 0) {
+          openShiftsQuery = openShiftsQuery.in("project_id", allProjectIdentifiers);
+        }
+
+        const { data: openShifts } = await openShiftsQuery;
+        if (Array.isArray(openShifts) && openShifts.length > 0) {
+          for (const s of openShifts) {
+            const { data: existing } = await supabase
+              .from("attendance_approvals")
+              .select("id")
+              .eq("shift_id", s.id)
+              .maybeSingle();
+
+            if (!existing) {
+              await supabase.from("attendance_approvals").insert({
+                shift_id: s.id,
+                employee_id: s.employee_id,
+                project_id: s.project_id,
+                supervisor_id: supervisor.id,
+                decision: "PENDING",
+                reviewed_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (_syncErr) {}
+
+      let approvalsQuery = supabase
+        .from("attendance_approvals")
+        .select("*")
+        .eq("decision", "PENDING")
+        .order("created_at", { ascending: false });
+
+      if (allProjectIdentifiers.length > 0) {
+        approvalsQuery = approvalsQuery.in("project_id", allProjectIdentifiers);
+      }
+
+      const { data: approvalsData, error: apprErr } = await approvalsQuery;
+      if (apprErr) {
+        return new Response(JSON.stringify({ error: apprErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const enrichedApprovals = [];
+      for (const a of (approvalsData || [])) {
+        const { data: shift } = await supabase
+          .from("attendance_shifts")
+          .select("*")
+          .eq("id", a.shift_id)
+          .maybeSingle();
+
+        const { data: emp } = await supabase
+          .from("employees")
+          .select("employee_name, employee_id, civil_id")
+          .eq("id", a.employee_id)
+          .maybeSingle();
+
+        const { data: prj } = await supabase
+          .from("projects")
+          .select("project_name, project_code")
+          .eq("id", a.project_id)
+          .maybeSingle();
+
+        enrichedApprovals.push({
+          id: a.id,
+          shift_id: a.shift_id,
+          employee_id: a.employee_id,
+          project_id: a.project_id,
+          supervisor_id: a.supervisor_id,
+          decision: a.decision,
+          comment: a.comment,
+          reviewed_at: a.reviewed_at,
+          created_at: a.created_at,
+          updated_at: a.updated_at,
+          employee_name: emp?.employee_name ?? "Employee",
+          employee_code: emp?.employee_id ?? emp?.civil_id ?? "",
+          project_name: prj?.project_name ?? prj?.project_code ?? "Project Site",
+          shift_date: shift?.shift_date ?? "",
+          clock_in_time: shift?.clock_in_time ?? shift?.created_at,
+          clock_out_time: shift?.clock_out_time,
+          total_worked_minutes: shift?.total_worked_minutes,
+          compliance_flag: shift?.compliance_flag ?? "VERIFIED",
+          selfie_url: shift?.selfie_url ?? null
+        });
+      }
+
+      return new Response(JSON.stringify({ approvals: enrichedApprovals, error: null }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

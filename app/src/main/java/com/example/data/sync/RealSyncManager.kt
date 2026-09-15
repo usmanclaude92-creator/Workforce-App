@@ -91,8 +91,29 @@ class RealSyncManager(
                 selfieLocalPath = durablePath, queuedAtEpochMs = System.currentTimeMillis(), syncStatus = SyncStatus.PENDING
             )
         )
+        // Mirror to the Room 'attendance_records' table (mirroring Supabase schema)
+        try {
+            val record = com.example.data.entity.AttendanceRecordEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                clientEventId = clientEventId,
+                employeeId = employeeId,
+                shiftDate = deviceTimestamp.take(10),
+                action = action.uppercase(),
+                deviceTimestamp = deviceTimestamp,
+                latitude = latitude,
+                longitude = longitude,
+                gpsAccuracyMeters = accuracy,
+                isMockLocation = isMockLocation,
+                selfieLocalPath = durablePath,
+                syncStatus = "PENDING_SYNC",
+                createdAtEpochMs = System.currentTimeMillis()
+            )
+            com.example.data.AppDatabase.getInstance(context).attendanceRecordDao().insertRecord(record)
+        } catch (_: Exception) {}
+
         refreshCounts()
         AttendanceSyncWorker.enqueueOneTimeWork(context)
+        OfflineAttendanceRecordSyncWorker.enqueueWork(context)
     }
 
     suspend fun queueLeaveRequest(clientRequestId: String, leaveType: String, startDate: String, endDate: String, reason: String) {
@@ -156,15 +177,30 @@ class RealSyncManager(
         return when (result) {
             is BackendResult.Success -> {
                 dao.updateAttendanceEvent(item.copy(syncStatus = SyncStatus.SYNCED, syncedAtEpochMs = System.currentTimeMillis(), lastError = null))
+                try {
+                    val recDao = com.example.data.AppDatabase.getInstance(context).attendanceRecordDao()
+                    val rec = recDao.getRecordByClientEventId(item.clientEventId)
+                    if (rec != null) {
+                        recDao.markAsSynced(rec.id, System.currentTimeMillis(), storageUrl)
+                    }
+                } catch (_: Exception) {}
                 item.selfieLocalPath?.let { runCatching { File(it).delete() } }
                 true
             }
             is BackendResult.Failure -> {
                 val attempts = item.attempts + 1
                 val status = if (result.isNetworkError) SyncStatus.PENDING else SyncStatus.FAILED
+                val nextRetry = backoffTimestamp(attempts)
                 dao.updateAttendanceEvent(
-                    item.copy(syncStatus = status, attempts = attempts, lastError = result.message, nextRetryAtEpochMs = backoffTimestamp(attempts))
+                    item.copy(syncStatus = status, attempts = attempts, lastError = result.message, nextRetryAtEpochMs = nextRetry)
                 )
+                try {
+                    val recDao = com.example.data.AppDatabase.getInstance(context).attendanceRecordDao()
+                    val rec = recDao.getRecordByClientEventId(item.clientEventId)
+                    if (rec != null) {
+                        recDao.updateSyncFailure(rec.id, if (result.isNetworkError) "PENDING_SYNC" else "FAILED", attempts, result.message, nextRetry)
+                    }
+                } catch (_: Exception) {}
                 _status.value = _status.value.copy(lastError = result.message)
                 false
             }

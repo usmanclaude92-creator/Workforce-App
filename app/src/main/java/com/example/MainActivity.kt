@@ -77,6 +77,8 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
         FcmNotificationManager.createNotificationChannels(this)
+        com.example.data.sync.AttendanceSyncWorker.schedulePeriodicWork(this)
+        com.example.data.sync.OfflineAttendanceRecordSyncWorker.schedulePeriodicWork(this)
         setContent {
             val themePreferences = remember { ThemePreferences.getInstance(applicationContext) }
             val themeSettings by themePreferences.settings.collectAsState()

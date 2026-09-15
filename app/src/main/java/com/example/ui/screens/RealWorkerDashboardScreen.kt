@@ -91,65 +91,14 @@ fun RealWorkerDashboardScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = screenBg,
         topBar = {
-            if (tab == RealWorkerTab.LOGS) {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = "My Shifts Summary",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
-                            )
-                            Text(
-                                text = "${uiState.profile?.fullName ?: employeeName} • ${uiState.profile?.employeeCode ?: employeeCode}",
-                                fontSize = 12.sp,
-                                color = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
-                            )
-                        }
-                    },
-                    actions = {
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = if (isDark) SophisticatedPrimaryContainer.copy(alpha = 0.6f) else SophisticatedLightPrimaryContainer,
-                            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.35f)),
-                            modifier = Modifier.padding(end = 12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isDark) SophisticatedSuccess else SophisticatedLightSuccess)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Cloud Synced",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SophisticatedPrimary
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface,
-                        titleContentColor = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
-                    )
-                )
-            } else {
-                ArtifyTopHeader(
-                    userName = employeeName,
-                    employeeId = employeeCode,
-                    role = uiState.profile?.role ?: "WORKER",
-                    onLogoutClick = onLogout,
-                    notificationCount = uiState.notifications.size,
-                    onNotificationClick = { showNotifications = true }
-                )
-            }
+            ArtifyTopHeader(
+                userName = employeeName,
+                employeeId = employeeCode,
+                role = uiState.profile?.role ?: "WORKER",
+                onLogoutClick = onLogout,
+                notificationCount = uiState.notifications.size,
+                onNotificationClick = { showNotifications = true }
+            )
         },
         bottomBar = {
             val navColors = @Composable {
@@ -557,7 +506,7 @@ private fun ShiftTab(
         ) {
             Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("View Daily Attendance Logs (Room DB)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("View Daily Attendance Logs", fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -878,6 +827,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         val matchesFilter = when (filter) {
             "ALL" -> true
             "COMPLETED" -> s.status != "OPEN"
+            "PENDING" -> s.status == "PENDING" || s.status == "PENDING_REVIEW"
             else -> s.status == filter
         }
         val formattedDate = formatDisplayDateDDMMYYYY(s.shiftDate)
@@ -893,59 +843,12 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
             .testTag("swipe_to_refresh_shifts")
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            // Cloud Database Connection Status Banner
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh,
-                border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
-            ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) SophisticatedSuccess else SophisticatedLightSuccess)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Connected to Workforce Cloud",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = textPrimary
-                    )
-                    Text(
-                        "Shift completion logs stored securely",
-                        fontSize = 9.5.sp,
-                        color = textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                IconButton(
-                    onClick = { viewModel.refresh() },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = SophisticatedPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        val totalMinutes = allShifts.sumOf { it.totalWorkedMinutes ?: 0 }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val totalMinutes = allShifts.sumOf { it.totalWorkedMinutes ?: 0 }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MiniStatCard("Completed", allShifts.count { it.status != "OPEN" }.toString(), "Total Shifts", Icons.Default.CheckCircle, Modifier.weight(1f))
             MiniStatCard("Approved", allShifts.count { it.status == "APPROVED" }.toString(), "Verified", Icons.Default.CheckCircle, Modifier.weight(1f))
             MiniStatCard("Hours", String.format(java.util.Locale.US, "%.1f", totalMinutes / 60.0), "Total Logged", Icons.Default.Schedule, Modifier.weight(1f))
-            MiniStatCard("Pending", allShifts.count { it.status == "PENDING_REVIEW" }.toString(), "In Review", Icons.Default.HourglassEmpty, Modifier.weight(1f))
+            MiniStatCard("Pending", allShifts.count { it.status == "PENDING" || it.status == "PENDING_REVIEW" }.toString(), "In Review", Icons.Default.HourglassEmpty, Modifier.weight(1f))
         }
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -972,7 +875,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                 "ALL" to "All Shifts",
                 "COMPLETED" to "Completed",
                 "APPROVED" to "Approved",
-                "PENDING_REVIEW" to "Pending Approval",
+                "PENDING" to "Pending",
                 "REJECTED" to "Rejected"
             ).forEach { (code, label) ->
                 val isSelected = filter == code
@@ -993,10 +896,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("LAST 30 ATTENDANCES (${filtered.size}) • LATEST TO OLDEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
-            Text("Cloud & Local Storage", fontSize = 9.5.sp, color = textMuted)
-        }
+        Text("LAST 30 ATTENDANCES (${filtered.size}) • LATEST TO OLDEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = textSecondary)
         Spacer(modifier = Modifier.height(8.dp))
 
         if (filtered.isEmpty()) {
@@ -1107,23 +1007,9 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    horizontalArrangement = Arrangement.End,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(50),
-                                        color = if (isDark) SophisticatedSuccessContainer.copy(alpha = 0.5f) else SophisticatedLightSuccessContainer,
-                                        border = BorderStroke(1.dp, SophisticatedSuccessBorder)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Default.CloudDone, contentDescription = null, tint = SophisticatedSuccess, modifier = Modifier.size(11.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Stored in Cloud", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SophisticatedSuccess)
-                                        }
-                                    }
                                     Text("Tap for details", fontSize = 9.5.sp, color = textMuted)
                                 }
                             }

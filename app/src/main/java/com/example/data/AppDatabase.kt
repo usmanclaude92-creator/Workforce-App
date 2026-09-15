@@ -15,9 +15,10 @@ import com.example.data.entity.*
         LeaveRequestEntity::class,
         AuditLogEntity::class,
         NotificationEntity::class,
-        ErpOutboxEntity::class
+        ErpOutboxEntity::class,
+        AttendanceRecordEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun auditDao(): AuditDao
     abstract fun notificationDao(): NotificationDao
     abstract fun erpDao(): ErpDao
+    abstract fun attendanceRecordDao(): AttendanceRecordDao
 
     companion object {
         @Volatile

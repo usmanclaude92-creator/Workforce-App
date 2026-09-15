@@ -36,6 +36,7 @@ import com.example.data.entity.AttendanceEntity
 import com.example.data.entity.UserEntity
 import com.example.data.repository.WorkforceRepository
 import com.example.model.AttendanceState
+import com.example.ui.components.ArtifyTopHeader
 import com.example.ui.theme.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -110,68 +111,13 @@ fun DailyAttendanceLogsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "My Shifts Summary",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = SophisticatedTextPrimary
-                        )
-                        Text(
-                            text = "${currentUser.fullName} • ${currentUser.employeeId}",
-                            fontSize = 12.sp,
-                            color = SophisticatedTextSecondary
-                        )
-                    }
-                },
-                navigationIcon = {
-                    if (onBackClick != null) {
-                        IconButton(
-                            onClick = onBackClick,
-                            modifier = Modifier.testTag("daily_logs_back_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowBack,
-                                contentDescription = "Back",
-                                tint = SophisticatedTextPrimary
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // Cloud & Local Database Badge Pill
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = SophisticatedPrimaryContainer.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.3f)),
-                        modifier = Modifier.padding(end = 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(SophisticatedSuccess)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Cloud Synced",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SophisticatedPrimary
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = SophisticatedDarkSurface,
-                    titleContentColor = SophisticatedTextPrimary
-                )
+            ArtifyTopHeader(
+                userName = currentUser.fullName,
+                employeeId = currentUser.employeeId,
+                role = currentUser.role,
+                avatarUrl = currentUser.avatarUrl,
+                onLogoutClick = { onBackClick?.invoke() },
+                onBackClick = onBackClick
             )
         },
         containerColor = SophisticatedDarkBg
@@ -199,44 +145,6 @@ fun DailyAttendanceLogsScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
             item { Spacer(modifier = Modifier.height(6.dp)) }
-
-            // Cloud & Local Database Connection Card
-            item {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = SophisticatedDarkSurfaceHigh,
-                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(SophisticatedSuccess)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Connected to Workforce Cloud",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SophisticatedTextPrimary
-                            )
-                            Text(
-                                "Shift completion logs stored securely",
-                                fontSize = 10.sp,
-                                color = SophisticatedTextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
 
             // Summary Metrics Header Cards
             item {
@@ -362,24 +270,13 @@ fun DailyAttendanceLogsScreen(
 
             // Section Header with count
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "SHIFT RECORDS (${filteredLogs.size})",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SophisticatedTextSecondary,
-                        letterSpacing = 0.5.sp
-                    )
-                    Text(
-                        text = "Source: Local Room Database",
-                        fontSize = 11.sp,
-                        color = SophisticatedTextMuted
-                    )
-                }
+                Text(
+                    text = "SHIFT RECORDS (${filteredLogs.size})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SophisticatedTextSecondary,
+                    letterSpacing = 0.5.sp
+                )
             }
 
             // Attendance Logs List

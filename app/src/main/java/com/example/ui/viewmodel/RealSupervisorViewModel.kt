@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
 import com.example.data.repository.IWorkforceRepository
 import com.example.network.ArtifyBackendConfig
+import com.example.network.AttendanceApprovalDto
 import com.example.network.AttendanceShiftDto
 import com.example.network.AuditLogDto
 import com.example.network.ErpEventDto
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 
 data class RealSupervisorUiState(
     val pendingAttendance: List<AttendanceShiftDto> = emptyList(),
+    val pendingAttendanceApprovals: List<AttendanceApprovalDto> = emptyList(),
     val pendingLeave: List<LeaveRequestDto> = emptyList(),
     val attendanceRoster: List<AttendanceShiftDto> = emptyList(),
     val sites: List<SiteDto> = emptyList(),
@@ -48,6 +50,10 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
             when (val result = repository.pendingAttendance()) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingAttendance = result.value)
                 is BackendResult.Failure -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+            }
+            when (val result = repository.pendingAttendanceApprovals()) {
+                is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingAttendanceApprovals = result.value)
+                is BackendResult.Failure -> {}
             }
             when (val result = repository.pendingLeave()) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingLeave = result.value)
@@ -131,6 +137,63 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
                     refresh()
                 }
                 is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    /**
+     * Loads pending attendance requests specifically querying the 'attendance_approvals' table.
+     */
+    fun loadPendingAttendanceApprovals() {
+        viewModelScope.launch {
+            when (val result = repository.pendingAttendanceApprovals()) {
+                is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingAttendanceApprovals = result.value)
+                is BackendResult.Failure -> {}
+            }
+        }
+    }
+
+    /**
+     * Updates the status of an attendance record in the 'attendance_approvals' table based on a supervisor's 'Approve' or 'Reject' action,
+     * and dispatches a Firebase Cloud Messaging notification to the employee.
+     */
+    fun updateAttendanceApproval(
+        shiftId: String,
+        approve: Boolean,
+        comment: String?,
+        context: Context? = null,
+        supervisorName: String? = null
+    ) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            val decision = if (approve) "APPROVED" else "REJECTED"
+            when (val result = repository.updateAttendanceApprovalStatus(shiftId, decision, comment)) {
+                is BackendResult.Success -> {
+                    val approval = result.value
+                    if (context != null) {
+                        runCatching {
+                            FcmNotificationManager.dispatchAttendanceApprovalPushNotification(
+                                context = context,
+                                shiftId = approval.shiftId,
+                                employeeId = approval.employeeId,
+                                employeeName = approval.employeeName ?: "Employee",
+                                shiftDate = approval.shiftDate ?: "Today",
+                                supervisorName = supervisorName ?: "Supervisor",
+                                isApproved = approve,
+                                commentOrReason = comment
+                            )
+                        }
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        isProcessing = false,
+                        statusMessage = if (approve) "Attendance record approved." else "Attendance record rejected."
+                    )
+                    refresh()
+                }
+                is BackendResult.Failure -> {
+                    // Fallback to reviewAttendance if direct approval endpoint reported failure
+                    reviewAttendance(shiftId, approve, comment, context, supervisorName)
+                }
             }
         }
     }
