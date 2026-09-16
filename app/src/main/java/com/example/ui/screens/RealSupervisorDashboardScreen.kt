@@ -892,8 +892,18 @@ private fun InspectAttendanceDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 InspectRow("Shift Date", shift.shiftDate)
+                if (shift.scheduledStart != null || shift.scheduledEnd != null) {
+                    InspectRow("Scheduled Start", formatScheduledTime(shift.scheduledStart) ?: "—")
+                    InspectRow("Scheduled End", formatScheduledTime(shift.scheduledEnd) ?: "—")
+                }
                 InspectRow("Clock In", formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—")
                 InspectRow("Clock Out", formatShiftTime(shift.clockOut?.serverTimestamp) ?: "In progress")
+                if ((shift.lateMinutes ?: 0) > 0) {
+                    InspectRow("Late By", "${shift.lateMinutes} minutes")
+                }
+                if ((shift.earlyDepartureMinutes ?: 0) > 0) {
+                    InspectRow("Early Departure", "${shift.earlyDepartureMinutes} minutes")
+                }
                 InspectRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
                 InspectRow("Compliance", shift.complianceFlag.replace('_', ' '))
 
@@ -959,6 +969,12 @@ private fun formatShiftTime(iso: String?): String? {
     } catch (e: Exception) {
         null
     }
+}
+
+/** Scheduled start/end are plain "HH:MM:SS" wall-clock strings from HCMS's Shift Master -- just trim to "HH:MM" for display. */
+private fun formatScheduledTime(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    return if (raw.length >= 5) raw.substring(0, 5) else raw
 }
 
 @Composable

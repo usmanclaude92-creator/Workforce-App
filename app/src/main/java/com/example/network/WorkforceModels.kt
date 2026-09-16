@@ -37,6 +37,17 @@ data class AttendanceShiftDto(
     @Json(name = "reviewed_by") val reviewedBy: String? = null,
     @Json(name = "reviewed_at") val reviewedAt: String? = null,
     @Json(name = "review_comment") val reviewComment: String? = null,
+    // Schedule that applied on this shift's own date, snapshotted server-side at
+    // clock-in from HCMS's Shift Master + Project/Employee assignment -- never
+    // re-derived from the employee's current shift, so it stays correct even after a
+    // later shift reassignment. Null when nothing was configured/applicable that day.
+    @Json(name = "scheduled_shift_id") val scheduledShiftId: String? = null,
+    @Json(name = "scheduled_start") val scheduledStart: String? = null,
+    @Json(name = "scheduled_end") val scheduledEnd: String? = null,
+    @Json(name = "scheduled_break_minutes") val scheduledBreakMinutes: Int? = null,
+    @Json(name = "scheduled_standard_hours") val scheduledStandardHours: Double? = null,
+    @Json(name = "late_minutes") val lateMinutes: Int? = null,
+    @Json(name = "early_departure_minutes") val earlyDepartureMinutes: Int? = null,
     @Json(name = "clock_in") val clockIn: AttendanceEventSummary? = null,
     @Json(name = "clock_out") val clockOut: AttendanceEventSummary? = null,
     val employee: EmployeeSummary? = null,

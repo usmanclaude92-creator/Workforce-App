@@ -764,6 +764,12 @@ private fun formatShiftTime(iso: String?): String? {
     }
 }
 
+/** Scheduled start/end are plain "HH:MM:SS" wall-clock strings from HCMS's Shift Master -- just trim to "HH:MM" for display. */
+private fun formatScheduledTime(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    return if (raw.length >= 5) raw.substring(0, 5) else raw
+}
+
 /** Extracts epoch milliseconds from a shift's clockIn or clockOut timestamp, falling back to shiftDate. */
 private fun parseShiftInstantMs(shift: AttendanceShiftDto): Long {
     val raw = shift.clockIn?.serverTimestamp ?: shift.clockOut?.serverTimestamp
@@ -1146,8 +1152,18 @@ private fun AttendanceDetailDialog(shift: AttendanceShiftDto, uiState: RealWorke
 
                 KeyValueRow("Date", shift.shiftDate)
                 KeyValueRow("Site", shift.project?.name ?: "—")
+                if (shift.scheduledStart != null || shift.scheduledEnd != null) {
+                    KeyValueRow("Scheduled Start", formatScheduledTime(shift.scheduledStart) ?: "—")
+                    KeyValueRow("Scheduled End", formatScheduledTime(shift.scheduledEnd) ?: "—")
+                }
                 KeyValueRow("Clock In", formatShiftTime(shift.clockIn?.serverTimestamp) ?: "—")
                 KeyValueRow("Clock Out", formatShiftTime(shift.clockOut?.serverTimestamp) ?: "In progress")
+                if ((shift.lateMinutes ?: 0) > 0) {
+                    KeyValueRow("Late By", "${shift.lateMinutes} minutes")
+                }
+                if ((shift.earlyDepartureMinutes ?: 0) > 0) {
+                    KeyValueRow("Early Departure", "${shift.earlyDepartureMinutes} minutes")
+                }
                 KeyValueRow("Duration", "${shift.totalWorkedMinutes ?: 0} minutes")
                 KeyValueRow("Biometric Match", if (selfiePath != null) "Selfie captured & verified" else "No selfie on record")
                 KeyValueRow("Hardware Device", (shift.clockIn?.deviceId ?: shift.clockOut?.deviceId)?.take(18) ?: "Unknown")
