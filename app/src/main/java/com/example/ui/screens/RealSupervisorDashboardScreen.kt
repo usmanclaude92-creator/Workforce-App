@@ -31,17 +31,18 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.network.AttendanceShiftDto
-import com.example.network.AuditLogDto
-import com.example.network.ErpEventDto
 import com.example.network.LeaveRequestDto
+import com.example.network.NoMobileWorkerDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
+import com.example.location.LocationHelper
 import com.example.ui.components.ArtifyTopHeader
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealSupervisorUiState
 import com.example.ui.viewmodel.RealSupervisorViewModel
+import kotlinx.coroutines.launch
 
-private enum class SupTab { APPROVALS, ROSTER, LEAVE, SITES, AUDIT }
+private enum class SupTab { APPROVALS, ROSTER, LEAVE, SITES, SHIFT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,11 +141,11 @@ fun RealSupervisorDashboardScreen(
                     colors = navColors()
                 )
                 NavigationBarItem(
-                    selected = tab == SupTab.AUDIT,
-                    onClick = { tab = SupTab.AUDIT },
-                    icon = { Icon(Icons.Default.SyncAlt, contentDescription = "Audit & ERP") },
-                    label = { Text("ERP") },
-                    modifier = Modifier.testTag("nav_audit_erp"),
+                    selected = tab == SupTab.SHIFT,
+                    onClick = { tab = SupTab.SHIFT },
+                    icon = { Icon(Icons.Default.Fingerprint, contentDescription = "Shift") },
+                    label = { Text("Shift") },
+                    modifier = Modifier.testTag("nav_shift"),
                     colors = navColors()
                 )
             }
@@ -179,7 +180,13 @@ fun RealSupervisorDashboardScreen(
                             onReject = { rejectDialogFor = it to false }
                         )
                         SupTab.SITES -> SitesTab(uiState.sites)
-                        SupTab.AUDIT -> AuditErpTab(uiState.auditLogs, uiState.erpEvents)
+                        SupTab.SHIFT -> ShiftTab(
+                            uiState = uiState,
+                            onClockInSelf = { lat, lon -> viewModel.clockInSelf(lat, lon) },
+                            onClockOutSelf = { lat, lon -> viewModel.clockOutSelf(lat, lon) },
+                            onProxyClockIn = { id, lat, lon -> viewModel.proxyClockIn(id, lat, lon) },
+                            onProxyClockOut = { id, lat, lon -> viewModel.proxyClockOut(id, lat, lon) }
+                        )
                     }
                 }
             }
@@ -1457,8 +1464,13 @@ private fun AttendanceRosterCard(
 }
 
 @Composable
-private fun AuditErpTab(auditLogs: List<AuditLogDto>, erpEvents: List<ErpEventDto>) {
-    var subTab by remember { mutableIntStateOf(0) }
+private fun ShiftTab(
+    uiState: RealSupervisorUiState,
+    onClockInSelf: (Double?, Double?) -> Unit,
+    onClockOutSelf: (Double?, Double?) -> Unit,
+    onProxyClockIn: (String, Double?, Double?) -> Unit,
+    onProxyClockOut: (String, Double?, Double?) -> Unit
+) {
     val isDark = LocalIsDarkTheme.current
     val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
     val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
@@ -1466,129 +1478,148 @@ private fun AuditErpTab(auditLogs: List<AuditLogDto>, erpEvents: List<ErpEventDt
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
     val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
 
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val locationHelper = remember { LocationHelper(context) }
+
+    val myShiftOpen = uiState.myShift?.status == "OPEN"
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "Governance & ERP Integration",
+            text = "Shift Attendance",
             fontWeight = FontWeight.Bold,
             fontSize = 18.sp,
             color = textPrimary
         )
-        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "Record your own attendance, and clock in/out workers who have no mobile device of their own.",
+            fontSize = 11.sp,
+            color = textSecondary
+        )
+        Spacer(modifier = Modifier.height(14.dp))
 
-        TabRow(
-            selectedTabIndex = subTab,
-            containerColor = cardBg,
-            contentColor = SophisticatedPrimary,
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, cardBorder, RoundedCornerShape(12.dp))
+        // -------------------- My Attendance --------------------
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder)
         ) {
-            Tab(
-                selected = subTab == 0,
-                onClick = { subTab = 0 },
-                text = {
-                    Text(
-                        "Audit (${auditLogs.size})",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = if (subTab == 0) SophisticatedPrimary else textSecondary
-                    )
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Person, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("My Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
                 }
-            )
-            Tab(
-                selected = subTab == 1,
-                onClick = { subTab = 1 },
-                text = {
-                    Text(
-                        "ERP Outbox (${erpEvents.size})",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = if (subTab == 1) SophisticatedPrimary else textSecondary
-                    )
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (subTab == 0) {
-            if (auditLogs.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("No audit entries yet.", fontSize = 12.sp, color = textSecondary)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(auditLogs, key = { it.id }) { log ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = cardBg),
-                            border = BorderStroke(1.dp, cardBorder)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(
-                                        text = log.action.replace('_', ' '),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = SophisticatedPrimary
-                                    )
-                                    Text(
-                                        text = log.actorRole ?: "",
-                                        fontSize = 11.sp,
-                                        color = textMuted
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                log.reason?.let { Text(it, fontSize = 12.sp, color = textPrimary) }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(log.createdAt, fontSize = 10.sp, color = textMuted)
-                            }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (myShiftOpen) {
+                        "Clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}"
+                    } else {
+                        "Not currently clocked in."
+                    },
+                    fontSize = 12.sp,
+                    color = textSecondary
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            val loc = locationHelper.getCurrentLocation()
+                            if (myShiftOpen) onClockOutSelf(loc?.latitude, loc?.longitude)
+                            else onClockInSelf(loc?.latitude, loc?.longitude)
                         }
-                    }
+                    },
+                    enabled = !uiState.isProcessing,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (myShiftOpen) SophisticatedError else SophisticatedPrimary,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (myShiftOpen) "Clock Out" else "Clock In", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // -------------------- Workers Without Mobile --------------------
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Groups, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Workers Without a Mobile Device (${uiState.noMobileWorkers.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = textPrimary
+            )
+        }
+        Text(
+            text = "Team members who have never registered a device -- record their attendance here on their behalf.",
+            fontSize = 11.sp,
+            color = textSecondary
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (uiState.noMobileWorkers.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Every team member has a registered mobile device.",
+                    fontSize = 12.sp,
+                    color = textMuted,
+                    textAlign = TextAlign.Center
+                )
+            }
         } else {
-            if (erpEvents.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("No ERP outbox events yet.", fontSize = 12.sp, color = textSecondary)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(erpEvents, key = { it.id }) { event ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = cardBg),
-                            border = BorderStroke(1.dp, cardBorder)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                uiState.noMobileWorkers.forEach { worker ->
+                    val isOpen = worker.openShiftId != null
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        border = BorderStroke(1.dp, cardBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = event.eventType,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = textPrimary
-                                    )
-                                    StatusPill(event.status)
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Idempotency: ${event.idempotencyKey}", fontSize = 10.sp, color = textMuted)
-                                Text("ERP Ref: ${event.responseRef ?: "PENDING"}", fontSize = 11.sp, color = SophisticatedPrimary, fontWeight = FontWeight.Medium)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(worker.fullName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
+                                Text("${worker.employeeCode} · ${worker.role}", fontSize = 11.sp, color = textMuted)
+                                Text(
+                                    text = if (isOpen) "On shift since ${formatShiftTime(worker.clockInTime) ?: "—"}" else "Not clocked in today",
+                                    fontSize = 11.sp,
+                                    color = if (isOpen) SophisticatedSuccess else textSecondary
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val loc = locationHelper.getCurrentLocation()
+                                        if (isOpen) onProxyClockOut(worker.id, loc?.latitude, loc?.longitude)
+                                        else onProxyClockIn(worker.id, loc?.latitude, loc?.longitude)
+                                    }
+                                },
+                                enabled = !uiState.isProcessing,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isOpen) SophisticatedError else SophisticatedPrimary,
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text(if (isOpen) "Clock Out" else "Clock In", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

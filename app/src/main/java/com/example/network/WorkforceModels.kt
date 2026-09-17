@@ -48,6 +48,9 @@ data class AttendanceShiftDto(
     @Json(name = "scheduled_standard_hours") val scheduledStandardHours: Double? = null,
     @Json(name = "late_minutes") val lateMinutes: Int? = null,
     @Json(name = "early_departure_minutes") val earlyDepartureMinutes: Int? = null,
+    // Null for an ordinary self-service mobile punch; the recording supervisor's own
+    // employee id for one entered on behalf of a worker with no mobile device.
+    @Json(name = "recorded_by") val recordedBy: String? = null,
     @Json(name = "clock_in") val clockIn: AttendanceEventSummary? = null,
     @Json(name = "clock_out") val clockOut: AttendanceEventSummary? = null,
     val employee: EmployeeSummary? = null,
@@ -278,6 +281,34 @@ data class SupervisorMetricsDto(
     @Json(name = "on_leave") val onLeave: Int = 0,
     val error: String? = null
 )
+
+// A team member the supervisor's scope contains who has never completed device
+// registration (civil-id-register) -- i.e. has no mobile of their own -- so their
+// attendance is recorded by the supervisor directly via the Shift tab.
+@JsonClass(generateAdapter = true)
+data class NoMobileWorkerDto(
+    val id: String,
+    @Json(name = "employee_code") val employeeCode: String,
+    @Json(name = "full_name") val fullName: String,
+    val role: String,
+    @Json(name = "open_shift_id") val openShiftId: String? = null,
+    @Json(name = "clock_in_time") val clockInTime: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TeamWithoutMobileResponse(val workers: List<NoMobileWorkerDto>? = null, val error: String? = null)
+
+@JsonClass(generateAdapter = true)
+data class ProxyAttendanceRequest(
+    val action: String,
+    @Json(name = "employee_id") val employeeId: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ProxyAttendanceResponse(val shift: AttendanceShiftDto? = null, val error: String? = null)
+
 
 @JsonClass(generateAdapter = true)
 data class ShiftCompletionLog(

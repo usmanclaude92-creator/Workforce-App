@@ -13,8 +13,10 @@ import com.example.network.GetSelfieUrlRequest
 import com.example.network.LeaveRequestDto
 import com.example.network.MyLeaveRequestsRequest
 import com.example.network.MyShiftsRequest
+import com.example.network.NoMobileWorkerDto
 import com.example.network.NotificationDto
 import com.example.network.ProfileDto
+import com.example.network.ProxyAttendanceRequest
 import com.example.network.RosterEmployeeDto
 import com.example.network.SiteDto
 import com.example.network.SubmitLeaveRequest
@@ -369,6 +371,42 @@ class BackendWorkforceRepository(
             val body = response.body()
             if (!response.isSuccessful || body?.shifts == null) BackendResult.Failure(body?.error ?: "Failed to load attendance roster.")
             else BackendResult.Success(body.shifts)
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.teamWithoutMobile(auth, SupervisorActionRequest(action = "team_without_mobile"))
+            val body = response.body()
+            if (!response.isSuccessful || body?.workers == null) BackendResult.Failure(body?.error ?: "Failed to load team.")
+            else BackendResult.Success(body.workers)
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.proxyClockIn(auth, ProxyAttendanceRequest(action = "proxy_clock_in", employeeId = employeeId, latitude = latitude, longitude = longitude))
+            val body = response.body()
+            if (!response.isSuccessful || body?.shift == null) BackendResult.Failure(userFriendlyError(body?.error, response.code(), "Could not record clock-in."))
+            else BackendResult.Success(body.shift)
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
+    suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.proxyClockOut(auth, ProxyAttendanceRequest(action = "proxy_clock_out", employeeId = employeeId, latitude = latitude, longitude = longitude))
+            val body = response.body()
+            if (!response.isSuccessful || body?.shift == null) BackendResult.Failure(userFriendlyError(body?.error, response.code(), "Could not record clock-out."))
+            else BackendResult.Success(body.shift)
         } catch (e: IOException) {
             BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
         }
