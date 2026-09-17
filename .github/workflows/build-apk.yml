@@ -29,11 +29,29 @@ jobs:
           fi
           chmod +x gradlew
 
-      - name: Generate Debug Keystore
+      # debug.keystore is committed at the repo root so every build shares the same
+      # signing certificate -- a fresh keytool-generated keystore on every run made each
+      # CI-built APK conflict with the last on install ("App not installed as package
+      # conflicts with existing package"), since Android rejects installing/upgrading an
+      # APK over an existing install of the same applicationId signed with a different
+      # certificate. Only regenerate as a fallback if the committed file is ever missing.
+      - name: Verify Debug Keystore
         run: |
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f "debug.keystore" ]; then
+            echo "debug.keystore missing from repo -- generating a fallback (builds signed this way will NOT match prior installs)."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          else
+            keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep SHA256
+          fi
 
+      # versionCode was hardcoded at 1 forever, which independently blocks Android from
+      # treating a newer APK as an upgrade over an older one (even with a matching
+      # signature). The run number strictly increases across builds, so it's a safe,
+      # deterministic versionCode for CI-built APKs; local/Studio builds are unaffected
+      # (defaultConfig's own hardcoded fallback still applies when this var isn't set).
       - name: Build Debug APK
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK

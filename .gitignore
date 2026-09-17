@@ -15,4 +15,10 @@
 .cxx
 local.properties
 .env
-debug.keystore
+# debug.keystore is intentionally NOT ignored -- it's committed at the repo root so every
+# CI build signs with the same certificate (see .github/workflows/build-apk.yml), instead
+# of a fresh random one every run, which made every CI-built APK conflict with the last
+# ("App not installed as package conflicts with existing package") since Android refuses
+# to install/upgrade an APK over an existing install of the same applicationId signed with
+# a different certificate. A debug keystore's password/alias are a well-known Android
+# tooling convention (not a real secret), so committing it is standard practice.

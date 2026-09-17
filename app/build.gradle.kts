@@ -17,7 +17,12 @@ android {
     applicationId = "com.aistudio.artifyworkforce.wmfqka"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
+    // Hardcoded at 1 forever blocked Android from treating a newer APK as an upgrade
+    // over an older one (a same-or-lower versionCode is rejected on install even with a
+    // matching signature). CI passes the strictly-increasing GitHub Actions run number as
+    // APP_VERSION_CODE (see .github/workflows/build-apk.yml); local/Studio builds fall
+    // back to 1, unchanged from before.
+    versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
