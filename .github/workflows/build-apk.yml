@@ -54,6 +54,16 @@ jobs:
           APP_VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      # Prints the SIGNING CERTIFICATE ACTUALLY EMBEDDED IN THE BUILT APK, independent of
+      # the debug.keystore file check above -- confirms the Gradle signing config really
+      # applied to this output (not just that the keystore file on disk is the right one).
+      # Must match the fingerprint the "Verify Debug Keystore" step prints.
+      - name: Verify Built APK Signature
+        run: |
+          apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          echo "Inspecting: $apk"
+          keytool -printcert -jarfile "$apk" | grep -A1 "SHA256"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
