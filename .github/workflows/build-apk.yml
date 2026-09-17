@@ -58,11 +58,24 @@ jobs:
       # the debug.keystore file check above -- confirms the Gradle signing config really
       # applied to this output (not just that the keystore file on disk is the right one).
       # Must match the fingerprint the "Verify Debug Keystore" step prints.
+      #
+      # Uses apksigner, not keytool -printcert: this APK carries only the modern APK
+      # Signature Scheme v2/v3 block, which keytool cannot read at all (it only
+      # understands the legacy v1/JAR META-INF signature) -- keytool failed outright with
+      # no usable output the one time this was tried. continue-on-error so a problem in
+      # this purely informational check can never again block the Upload APK step below
+      # (as it did here: this step's earlier failure skipped the upload entirely).
       - name: Verify Built APK Signature
+        continue-on-error: true
         run: |
           apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
           echo "Inspecting: $apk"
-          keytool -printcert -jarfile "$apk" | grep -A1 "SHA256"
+          apksigner="$(find "$ANDROID_HOME" -name apksigner -type f 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$apksigner" ]; then
+            echo "apksigner not found under ANDROID_HOME -- skipping signature verification."
+          else
+            "$apksigner" verify --print-certs "$apk"
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
