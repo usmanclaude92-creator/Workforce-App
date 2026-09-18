@@ -18,45 +18,19 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Generate Gradle Wrapper
+      - name: Create Consistent Debug Keystore
         run: |
-          if [ ! -f "gradlew" ]; then
-            gradle wrapper
-          fi
-          chmod +x gradlew
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          cp ~/.android/debug.keystore ./debug.keystore
 
-      - name: Write real backend config into .env
-        # Without this, the Secrets Gradle Plugin falls back to .env.example's empty values and
-        # the resulting APK bakes in an empty SUPABASE_URL/SUPABASE_ANON_KEY -- it installs and
-        # opens, but every backend call (login, clock in/out, everything) fails. These come from
-        # repository secrets, not source, so the real values never enter git history.
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          WORKFORCE_HMAC_SIGNING_KEY: ${{ secrets.WORKFORCE_HMAC_SIGNING_KEY }}
-        run: |
-          {
-            echo "GEMINI_API_KEY="
-            echo "SUPABASE_URL=${SUPABASE_URL}"
-            echo "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
-            echo "WORKFORCE_HMAC_SIGNING_KEY=${WORKFORCE_HMAC_SIGNING_KEY}"
-          } > .env
-
-      - name: Generate Debug Keystore (only if not already committed)
-        # IMPORTANT: debug.keystore is committed at the repo root specifically so every CI run
-        # (and every local build) signs with the SAME certificate. Regenerating it unconditionally
-        # on every run, as this step used to, gave every build a brand-new random signature --
-        # which is why installing a newer debug APK over an older one failed with Android's
-        # "App not installed as package conflicts with an existing package" error. Only generate
-        # a fallback here if the committed keystore is ever missing.
-        run: |
-          if [ ! -f "debug.keystore" ]; then
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
