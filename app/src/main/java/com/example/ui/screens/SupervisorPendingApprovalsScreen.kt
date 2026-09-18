@@ -6,12 +6,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import com.example.network.AttendanceApprovalDto
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealSupervisorViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private data class ApprovalBadgeStyle(
     val bgColor: Color,
@@ -125,6 +130,9 @@ fun SupervisorPendingApprovalsScreen(
     var rejectReason by remember { mutableStateOf("") }
     var isRejectError by remember { mutableStateOf(false) }
 
+    val coroutineScope = rememberCoroutineScope()
+    var isPullRefreshing by remember { mutableStateOf(false) }
+
     // Initial load from attendance_approvals table
     LaunchedEffect(Unit) {
         viewModel.loadPendingAttendanceApprovals()
@@ -182,19 +190,12 @@ fun SupervisorPendingApprovalsScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "Pending Attendance Requests",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textPrimary
-                        )
-                        Text(
-                            text = "attendance_approvals workflow",
-                            fontSize = 11.5.sp,
-                            color = textSecondary
-                        )
-                    }
+                    Text(
+                        text = "Pending Attendance Requests",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary
+                    )
                 },
                 navigationIcon = {
                     if (onBackClick != null) {
@@ -231,12 +232,27 @@ fun SupervisorPendingApprovalsScreen(
             )
         }
     ) { innerPadding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = isPullRefreshing || uiState.isLoading,
+            onRefresh = {
+                coroutineScope.launch {
+                    isPullRefreshing = true
+                    viewModel.loadPendingAttendanceApprovals()
+                    viewModel.refresh()
+                    delay(600)
+                    isPullRefreshing = false
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp)
+                .testTag("pull_to_refresh_pending_approvals")
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+            ) {
             // Status bar count chip & explanation
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -271,11 +287,6 @@ fun SupervisorPendingApprovalsScreen(
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = textPrimary
-                            )
-                            Text(
-                                text = "Decisions update the ledger and trigger push alerts",
-                                fontSize = 11.sp,
-                                color = textSecondary
                             )
                         }
                     }
@@ -340,6 +351,7 @@ fun SupervisorPendingApprovalsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(top = 40.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -360,12 +372,14 @@ fun SupervisorPendingApprovalsScreen(
                             fontWeight = FontWeight.Bold,
                             color = textPrimary
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (searchQuery.isNotBlank()) "Try changing your search terms" else "The 'attendance_approvals' table has 0 pending items.",
-                            fontSize = 12.5.sp,
-                            color = textSecondary
-                        )
+                        if (searchQuery.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Try changing your search terms",
+                                fontSize = 12.5.sp,
+                                color = textSecondary
+                            )
+                        }
                     }
                 }
             } else {
@@ -394,6 +408,7 @@ fun SupervisorPendingApprovalsScreen(
             }
         }
     }
+}
 
     // Approve Confirmation Dialog
     approveDialogItem?.let { item ->

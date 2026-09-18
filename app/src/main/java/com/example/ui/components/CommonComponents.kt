@@ -238,26 +238,12 @@ fun ArtifyTopHeader(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Sub-header strip with Employee ID on the left & Sync icon in front of Staff on the right
+            // Sub-header strip with Employee ID & Role badge on the left & Sync icon on the right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                ) {
-                    Text(
-                        text = "ID: $employeeId",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
-                }
-
                 val triggerSync: () -> Unit = {
                     if (!isSyncing) {
                         isSyncing = true
@@ -276,23 +262,19 @@ fun ArtifyTopHeader(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Sync icon on header right side in front of Staff
-                    IconButton(
-                        onClick = triggerSync,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .testTag("header_sync_btn")
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Sync,
-                            contentDescription = "Sync Workforce Data",
-                            tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .rotate(rotationAngle)
-                                .testTag("header_sync_icon")
+                        Text(
+                            text = "ID: $employeeId",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
 
@@ -312,6 +294,24 @@ fun ArtifyTopHeader(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
+                }
+
+                // Sync icon on header right side
+                IconButton(
+                    onClick = triggerSync,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .testTag("header_sync_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = "Sync Workforce Data",
+                        tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .rotate(rotationAngle)
+                            .testTag("header_sync_icon")
+                    )
                 }
             }
         }

@@ -42,7 +42,7 @@ import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealSupervisorUiState
 import com.example.ui.viewmodel.RealSupervisorViewModel
 
-private enum class SupTab { APPROVALS, ROSTER, LEAVE, SITES, AUDIT }
+private enum class SupTab { HOME, ROSTER, LEAVE, SITES, AUDIT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +54,7 @@ fun RealSupervisorDashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var tab by remember { mutableStateOf(SupTab.APPROVALS) }
+    var tab by remember { mutableStateOf(SupTab.HOME) }
     var showPendingApprovalsScreen by remember { mutableStateOf(false) }
     var rejectDialogFor by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // id, isAttendance
     var approveDialogForShift by remember { mutableStateOf<String?>(null) }
@@ -62,6 +62,15 @@ fun RealSupervisorDashboardScreen(
     var showAssignShiftDialog by remember { mutableStateOf(false) }
     var assignShiftWorker by remember { mutableStateOf<AttendanceShiftDto?>(null) }
     var showExportPdfDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val supervisorPrefs = remember(supervisorCode) {
+        context.getSharedPreferences("artify_supervisor_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    val onboardingKey = "seen_supervisor_onboarding_${supervisorCode.ifBlank { "default" }}"
+    var showOnboardingDialog by remember(supervisorCode) {
+        mutableStateOf(!supervisorPrefs.getBoolean(onboardingKey, false))
+    }
 
     val isDark = LocalIsDarkTheme.current
     val screenBg = if (isDark) SophisticatedDarkBg else SophisticatedLightBg
@@ -74,6 +83,32 @@ fun RealSupervisorDashboardScreen(
             onBackClick = { showPendingApprovalsScreen = false }
         )
         return
+    }
+
+    val pendingOvertimeCount = remember(
+        uiState.pendingAttendanceApprovals,
+        uiState.pendingAttendance,
+        uiState.attendanceRoster
+    ) {
+        val specificOvertime = uiState.pendingAttendanceApprovals.count {
+            it.decision == "PENDING" && (
+                it.complianceFlag?.contains("OVERTIME", ignoreCase = true) == true ||
+                it.comment?.contains("overtime", ignoreCase = true) == true ||
+                it.complianceFlag?.contains("UNCLOSED", ignoreCase = true) == true
+            )
+        } + uiState.pendingAttendance.count {
+            it.complianceFlag.contains("OVERTIME", ignoreCase = true) ||
+            it.reviewComment?.contains("overtime", ignoreCase = true) == true
+        } + uiState.attendanceRoster.count {
+            it.status == "OPEN" && (it.complianceFlag.contains("OVERTIME", ignoreCase = true) || (it.totalWorkedMinutes ?: 0) > 480)
+        }
+
+        if (specificOvertime > 0) {
+            specificOvertime
+        } else {
+            val pendingApprovals = uiState.pendingAttendanceApprovals.count { it.decision == "PENDING" }
+            if (pendingApprovals > 0) pendingApprovals else uiState.pendingAttendance.size
+        }
     }
 
     Scaffold(
@@ -104,19 +139,27 @@ fun RealSupervisorDashboardScreen(
                 tonalElevation = 0.dp
             ) {
                 NavigationBarItem(
-                    selected = tab == SupTab.APPROVALS,
-                    onClick = { tab = SupTab.APPROVALS },
+                    selected = tab == SupTab.HOME,
+                    onClick = { tab = SupTab.HOME },
                     icon = {
                         BadgedBox(badge = {
-                            if (uiState.pendingAttendance.isNotEmpty()) {
-                                Badge(containerColor = SophisticatedWarning) {
-                                    Text(uiState.pendingAttendance.size.toString(), color = Color.White)
+                            if (pendingOvertimeCount > 0) {
+                                Badge(
+                                    containerColor = SophisticatedWarning,
+                                    contentColor = Color.White,
+                                    modifier = Modifier.testTag("home_tab_overtime_badge")
+                                ) {
+                                    Text(
+                                        text = if (pendingOvertimeCount > 99) "99+" else pendingOvertimeCount.toString(),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
-                        }) { Icon(Icons.Default.Verified, contentDescription = "Approvals") }
+                        }) { Icon(Icons.Default.Home, contentDescription = "Home") }
                     },
-                    label = { Text("Approvals") },
-                    modifier = Modifier.testTag("nav_approvals"),
+                    label = { Text("Home") },
+                    modifier = Modifier.testTag("nav_home"),
                     colors = navColors()
                 )
                 NavigationBarItem(
@@ -169,60 +212,14 @@ fun RealSupervisorDashboardScreen(
                 .background(screenBg)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                MetricsBar(uiState.metrics)
-
-                // Quick Actions Bar for Supervisor (PDF Export & Current Tab Header)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = when (tab) {
-                            SupTab.APPROVALS -> "Shift Approvals"
-                            SupTab.ROSTER -> "Workforce Roster"
-                            SupTab.LEAVE -> "Leave Requests"
-                            SupTab.SITES -> "Active Sites"
-                            SupTab.AUDIT -> "Audit & ERP"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
-                    )
-
-                    Button(
-                        onClick = { showExportPdfDialog = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SophisticatedPrimary,
-                            contentColor = SophisticatedOnPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("btn_monthly_pdf_report")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PictureAsPdf,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Monthly PDF Report",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                if (tab == SupTab.HOME) {
+                    MetricsBar(uiState.metrics)
                 }
 
                 Box(modifier = Modifier.weight(1f)) {
                     when (tab) {
-                        SupTab.APPROVALS -> ApprovalsTab(
-                            uiState,
-                            onInspect = { inspectShift = it },
-                            onApprove = { approveDialogForShift = it },
-                            onReject = { rejectDialogFor = it to true },
+                        SupTab.HOME -> HomeTab(
+                            uiState = uiState,
                             onOpenPendingApprovals = { showPendingApprovalsScreen = true }
                         )
                         SupTab.ROSTER -> RosterTab(
@@ -314,7 +311,14 @@ fun RealSupervisorDashboardScreen(
         )
     }
 
-    val context = LocalContext.current
+    if (showOnboardingDialog) {
+        SupervisorOnboardingDialog(
+            onDismiss = {
+                supervisorPrefs.edit().putBoolean(onboardingKey, true).apply()
+                showOnboardingDialog = false
+            }
+        )
+    }
 
     rejectDialogFor?.let { (id, isAttendance) ->
         MandatoryReasonPrompt(
@@ -621,11 +625,8 @@ private fun ApproveCommentPrompt(onDismiss: () -> Unit, onConfirm: (String) -> U
 }
 
 @Composable
-private fun ApprovalsTab(
+private fun HomeTab(
     uiState: RealSupervisorUiState,
-    onInspect: (AttendanceShiftDto) -> Unit,
-    onApprove: (String) -> Unit,
-    onReject: (String) -> Unit,
     onOpenPendingApprovals: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -635,7 +636,8 @@ private fun ApprovalsTab(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Bottom
     ) {
         if (onOpenPendingApprovals != null) {
             Surface(
@@ -648,30 +650,45 @@ private fun ApprovalsTab(
                     .testTag("open_pending_approvals_screen_btn")
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.PendingActions,
                             contentDescription = null,
                             tint = SophisticatedPrimary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = "Pending Attendance Requests Queue",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = textPrimary
-                            )
-                            Text(
-                                text = "Query attendance_approvals directly with approval actions",
-                                fontSize = 11.sp,
-                                color = textSecondary
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Pending Attendance Requests Queue",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp,
+                                    color = textPrimary
+                                )
+                                if (uiState.pendingAttendance.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = SophisticatedWarning
+                                    ) {
+                                        Text(
+                                            text = uiState.pendingAttendance.size.toString(),
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     Icon(
@@ -680,48 +697,6 @@ private fun ApprovalsTab(
                         tint = SophisticatedPrimary,
                         modifier = Modifier.size(20.dp)
                     )
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        Text(
-            text = "Pending Attendance Submissions (${uiState.pendingAttendance.size})",
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            color = textPrimary
-        )
-        Text(
-            text = "Review selfie biometric evidence & verified server timestamps",
-            fontSize = 12.sp,
-            color = textSecondary
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (uiState.pendingAttendance.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.TaskAlt,
-                        contentDescription = null,
-                        tint = SophisticatedSuccess,
-                        modifier = Modifier.size(52.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "All pending attendances have been reviewed!",
-                        color = textPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(uiState.pendingAttendance, key = { it.id }) { shift ->
-                    AttendanceApprovalCard(shift, onInspect, onApprove, onReject)
                 }
             }
         }
@@ -1380,15 +1355,9 @@ private fun RosterTab(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Assign Shift & Push Alert",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = SophisticatedPrimary
-                    )
-                    Text(
-                        text = "Dispatch FCM push alerts to employee devices for shift assignments or schedule updates.",
-                        fontSize = 11.sp,
-                        color = textSecondary
+                        text = "Push alerts to employees for shift assignments or schedule updates.",
+                        fontSize = 12.sp,
+                        color = textPrimary
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1402,65 +1371,6 @@ private fun RosterTab(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text("Send Alert", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Monthly Attendance PDF Report Action Banner
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp)
-                .clickable { onOpenExportPdf() },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = SophisticatedPrimary.copy(alpha = 0.12f)),
-            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.35f))
-        ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .background(SophisticatedPrimary.copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PictureAsPdf,
-                        contentDescription = null,
-                        tint = SophisticatedPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Monthly Attendance PDF Report",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = SophisticatedPrimary
-                    )
-                    Text(
-                        text = "Generate and share certified monthly attendance summaries with geofence & biometric audit data.",
-                        fontSize = 11.sp,
-                        color = textSecondary
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = onOpenExportPdf,
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SophisticatedPrimary,
-                        contentColor = SophisticatedOnPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("btn_roster_export_monthly_pdf")
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Export & Share", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2297,6 +2207,184 @@ fun AssignShiftScheduleDialog(
                             fontSize = 12.sp
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SupervisorOnboardingDialog(
+    onDismiss: () -> Unit
+) {
+    val isDark = LocalIsDarkTheme.current
+    val surfaceColor = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+    val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = surfaceColor,
+            border = BorderStroke(1.dp, cardBorder),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+                .testTag("supervisor_onboarding_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Header with Badge & Icon
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(SophisticatedPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = SophisticatedPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Supervisor Quick Guide",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            color = textPrimary
+                        )
+                        Text(
+                            text = "Essential tools to manage your team",
+                            fontSize = 12.sp,
+                            color = textSecondary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Card 1: How to initiate a shift
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = SophisticatedPrimary.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(SophisticatedPrimary.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = SophisticatedPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "1. How to Initiate a Shift",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Open the Roster tab to assign shifts or notify workers. On-site workers also initiate shifts by scanning a biometric verification selfie at their assigned geofenced project location.",
+                                fontSize = 12.sp,
+                                color = textSecondary,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Card 2: Where to find Pending Attendance Request queue
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = SophisticatedWarning.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, SophisticatedWarning.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(SophisticatedWarning.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PendingActions,
+                                contentDescription = null,
+                                tint = SophisticatedWarning,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "2. Pending Attendance Queue",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Located at the bottom of your Home screen. Tap 'Pending Attendance Requests Queue' to review submitted shift verifications, check audit photos, and approve overtime requests.",
+                                fontSize = 12.sp,
+                                color = textSecondary,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Dismiss / Action Button
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("dismiss_onboarding_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SophisticatedPrimary,
+                        contentColor = SophisticatedOnPrimary
+                    )
+                ) {
+                    Text(
+                        text = "Got It, Let's Begin",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }
