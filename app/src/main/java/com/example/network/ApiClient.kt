@@ -51,7 +51,7 @@ object ArtifyBackendConfig {
             url = if (url.contains(".") && !url.startsWith("sb_") && !url.startsWith("ey")) {
                 "https://$url"
             } else {
-                "https://api.artify-workforce.supabase.co"
+                "https://jpsiafvbyupofnbqonkq.supabase.co"
             }
         }
 
@@ -59,7 +59,7 @@ object ArtifyBackendConfig {
 
         val isValid = url.toHttpUrlOrNull() != null
         if (!isValid) {
-            url = "https://api.artify-workforce.supabase.co"
+            url = "https://jpsiafvbyupofnbqonkq.supabase.co"
         }
 
         return url to key
