@@ -5,6 +5,8 @@ import android.util.Base64
 import com.example.data.repository.BackendResult
 import com.example.data.repository.BackendWorkforceRepository
 import com.example.data.repository.IWorkforceRepository
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +20,11 @@ import java.io.File
 import java.util.UUID
 import kotlin.math.min
 import kotlin.math.pow
+
+/** JSON payload shapes for [PendingSupervisorActionEntity.payloadJson], keyed by [SupervisorActionType]. */
+data class ProxyClockActionPayload(val employeeId: String, val latitude: Double?, val longitude: Double?)
+data class AttendanceApprovalActionPayload(val shiftId: String, val approve: Boolean, val comment: String?)
+data class LeaveReviewActionPayload(val leaveId: String, val approve: Boolean, val comment: String?)
 
 data class SyncQueueStatus(
     val isSyncing: Boolean = false,
@@ -51,6 +58,10 @@ class RealSyncManager(
     private val dao = RealSyncDatabase.getInstance(context).pendingSyncDao()
     private val storageService = com.example.data.repository.SupabaseStorageService(context)
     private val syncMutex = Mutex()
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val proxyClockPayloadAdapter = moshi.adapter(ProxyClockActionPayload::class.java)
+    private val attendanceApprovalPayloadAdapter = moshi.adapter(AttendanceApprovalActionPayload::class.java)
+    private val leaveReviewPayloadAdapter = moshi.adapter(LeaveReviewActionPayload::class.java)
 
     private val _status = MutableStateFlow(SyncQueueStatus(isOnline = networkMonitor.isOnlineNow()))
     val status: StateFlow<SyncQueueStatus> = _status.asStateFlow()
@@ -74,8 +85,13 @@ class RealSyncManager(
     suspend fun refreshCounts() {
         val pendingAttendance = dao.getUnsyncedAttendanceEvents(employeeId)
         val pendingLeave = dao.getUnsyncedLeaveRequests(employeeId)
-        val pending = pendingAttendance.count { it.syncStatus == SyncStatus.PENDING } + pendingLeave.count { it.syncStatus == SyncStatus.PENDING }
-        val failed = pendingAttendance.count { it.syncStatus == SyncStatus.FAILED } + pendingLeave.count { it.syncStatus == SyncStatus.FAILED }
+        val pendingSupervisorActions = dao.getUnsyncedSupervisorActions(employeeId)
+        val pending = pendingAttendance.count { it.syncStatus == SyncStatus.PENDING } +
+            pendingLeave.count { it.syncStatus == SyncStatus.PENDING } +
+            pendingSupervisorActions.count { it.syncStatus == SyncStatus.PENDING }
+        val failed = pendingAttendance.count { it.syncStatus == SyncStatus.FAILED } +
+            pendingLeave.count { it.syncStatus == SyncStatus.FAILED } +
+            pendingSupervisorActions.count { it.syncStatus == SyncStatus.FAILED }
         _status.value = _status.value.copy(pendingCount = pending, failedCount = failed)
     }
 
@@ -127,6 +143,54 @@ class RealSyncManager(
         AttendanceSyncWorker.enqueueOneTimeWork(context)
     }
 
+    /** Queues a proxy clock-in/out for a team member ([targetEmployeeId]) the supervisor recorded while offline. */
+    suspend fun queueProxyClockEvent(action: String, targetEmployeeId: String, latitude: Double?, longitude: Double?, selfieLocalPath: String?) {
+        val durablePath = selfieLocalPath?.let { copySelfieToDurableStorage(it) }
+        dao.insertSupervisorAction(
+            PendingSupervisorActionEntity(
+                clientActionId = UUID.randomUUID().toString(),
+                supervisorId = employeeId,
+                actionType = action,
+                payloadJson = proxyClockPayloadAdapter.toJson(ProxyClockActionPayload(targetEmployeeId, latitude, longitude)),
+                selfieLocalPath = durablePath,
+                queuedAtEpochMs = System.currentTimeMillis(),
+                syncStatus = SyncStatus.PENDING
+            )
+        )
+        refreshCounts()
+        AttendanceSyncWorker.enqueueOneTimeWork(context)
+    }
+
+    suspend fun queueAttendanceApproval(shiftId: String, approve: Boolean, comment: String?) {
+        dao.insertSupervisorAction(
+            PendingSupervisorActionEntity(
+                clientActionId = UUID.randomUUID().toString(),
+                supervisorId = employeeId,
+                actionType = SupervisorActionType.ATTENDANCE_APPROVAL,
+                payloadJson = attendanceApprovalPayloadAdapter.toJson(AttendanceApprovalActionPayload(shiftId, approve, comment)),
+                queuedAtEpochMs = System.currentTimeMillis(),
+                syncStatus = SyncStatus.PENDING
+            )
+        )
+        refreshCounts()
+        AttendanceSyncWorker.enqueueOneTimeWork(context)
+    }
+
+    suspend fun queueLeaveReview(leaveId: String, approve: Boolean, comment: String?) {
+        dao.insertSupervisorAction(
+            PendingSupervisorActionEntity(
+                clientActionId = UUID.randomUUID().toString(),
+                supervisorId = employeeId,
+                actionType = SupervisorActionType.LEAVE_REVIEW,
+                payloadJson = leaveReviewPayloadAdapter.toJson(LeaveReviewActionPayload(leaveId, approve, comment)),
+                queuedAtEpochMs = System.currentTimeMillis(),
+                syncStatus = SyncStatus.PENDING
+            )
+        )
+        refreshCounts()
+        AttendanceSyncWorker.enqueueOneTimeWork(context)
+    }
+
     /** [force] ignores backoff timers — used by the user-facing "Sync Now" action. */
     suspend fun syncNow(force: Boolean = false) {
         if (syncMutex.isLocked) return // a sync is already running
@@ -153,6 +217,15 @@ class RealSyncManager(
                 val now = System.currentTimeMillis()
                 if (!force && item.nextRetryAtEpochMs > now) break
                 val outcome = syncLeaveRequest(item)
+                if (!outcome) { lastError = _status.value.lastError; break }
+            }
+
+            val supervisorActionQueue = dao.getUnsyncedSupervisorActions(employeeId)
+            for (item in supervisorActionQueue) {
+                if (item.syncStatus == SyncStatus.FAILED && !force) break
+                val now = System.currentTimeMillis()
+                if (!force && item.nextRetryAtEpochMs > now) break
+                val outcome = syncSupervisorAction(item)
                 if (!outcome) { lastError = _status.value.lastError; break }
             }
 
@@ -219,6 +292,57 @@ class RealSyncManager(
                 val attempts = item.attempts + 1
                 val status = if (result.isNetworkError) SyncStatus.PENDING else SyncStatus.FAILED
                 dao.updateLeaveRequest(
+                    item.copy(syncStatus = status, attempts = attempts, lastError = result.message, nextRetryAtEpochMs = backoffTimestamp(attempts))
+                )
+                _status.value = _status.value.copy(lastError = result.message)
+                false
+            }
+        }
+    }
+
+    /** Returns true if this item is now synced, false if the batch should stop here. */
+    private suspend fun syncSupervisorAction(item: PendingSupervisorActionEntity): Boolean {
+        dao.updateSupervisorAction(item.copy(syncStatus = SyncStatus.SYNCING))
+
+        val result: BackendResult<*> = when (item.actionType) {
+            SupervisorActionType.PROXY_CLOCK_IN, SupervisorActionType.PROXY_CLOCK_OUT -> {
+                val payload = runCatching { proxyClockPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) {
+                    BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                } else {
+                    val selfieFile = item.selfieLocalPath?.let { File(it) }
+                    val storageUrl = if (selfieFile != null && selfieFile.exists()) storageService.uploadSelfieFile(selfieFile).getOrNull() else null
+                    val selfiePayload = storageUrl ?: item.selfieLocalPath?.let { encodeSelfieFile(it) }
+                    if (item.actionType == SupervisorActionType.PROXY_CLOCK_IN) {
+                        repository.proxyClockIn(payload.employeeId, payload.latitude, payload.longitude, selfiePayload)
+                    } else {
+                        repository.proxyClockOut(payload.employeeId, payload.latitude, payload.longitude, selfiePayload)
+                    }
+                }
+            }
+            SupervisorActionType.ATTENDANCE_APPROVAL -> {
+                val payload = runCatching { attendanceApprovalPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                else repository.updateAttendanceApprovalStatus(payload.shiftId, if (payload.approve) "APPROVED" else "REJECTED", payload.comment)
+            }
+            SupervisorActionType.LEAVE_REVIEW -> {
+                val payload = runCatching { leaveReviewPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                else repository.reviewLeave(payload.leaveId, payload.approve, payload.comment)
+            }
+            else -> BackendResult.Failure("Unknown queued action type: ${item.actionType}", isNetworkError = false)
+        }
+
+        return when (result) {
+            is BackendResult.Success -> {
+                dao.updateSupervisorAction(item.copy(syncStatus = SyncStatus.SYNCED, syncedAtEpochMs = System.currentTimeMillis(), lastError = null))
+                item.selfieLocalPath?.let { runCatching { File(it).delete() } }
+                true
+            }
+            is BackendResult.Failure -> {
+                val attempts = item.attempts + 1
+                val status = if (result.isNetworkError) SyncStatus.PENDING else SyncStatus.FAILED
+                dao.updateSupervisorAction(
                     item.copy(syncStatus = status, attempts = attempts, lastError = result.message, nextRetryAtEpochMs = backoffTimestamp(attempts))
                 )
                 _status.value = _status.value.copy(lastError = result.message)

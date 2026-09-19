@@ -45,4 +45,19 @@ interface PendingSyncDao {
 
     @Query("DELETE FROM pending_leave_requests WHERE syncStatus = 'SYNCED' AND syncedAtEpochMs < :beforeEpochMs")
     suspend fun pruneSyncedLeaveRequests(beforeEpochMs: Long)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSupervisorAction(entity: PendingSupervisorActionEntity)
+
+    @Update
+    suspend fun updateSupervisorAction(entity: PendingSupervisorActionEntity)
+
+    @Query("SELECT * FROM pending_supervisor_actions WHERE supervisorId = :supervisorId AND syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
+    suspend fun getUnsyncedSupervisorActions(supervisorId: String): List<PendingSupervisorActionEntity>
+
+    @Query("SELECT * FROM pending_supervisor_actions WHERE syncStatus != 'SYNCED' ORDER BY queuedAtEpochMs ASC")
+    suspend fun getAllUnsyncedSupervisorActions(): List<PendingSupervisorActionEntity>
+
+    @Query("DELETE FROM pending_supervisor_actions WHERE syncStatus = 'SYNCED' AND syncedAtEpochMs < :beforeEpochMs")
+    suspend fun pruneSyncedSupervisorActions(beforeEpochMs: Long)
 }

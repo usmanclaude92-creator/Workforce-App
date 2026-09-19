@@ -16,6 +16,8 @@ import com.example.data.repository.BackendResult
 import com.example.data.repository.BackendWorkforceRepository
 import com.example.data.repository.SupabaseStorageService
 import com.example.security.SecureSessionStore
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -39,6 +41,10 @@ class AttendanceSyncWorker(
     private val authRepo = BackendAuthRepository(sessionStore)
     private val repository = BackendWorkforceRepository(authRepo, sessionStore)
     private val storageService = SupabaseStorageService(appContext, sessionStore)
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val proxyClockPayloadAdapter = moshi.adapter(ProxyClockActionPayload::class.java)
+    private val attendanceApprovalPayloadAdapter = moshi.adapter(AttendanceApprovalActionPayload::class.java)
+    private val leaveReviewPayloadAdapter = moshi.adapter(LeaveReviewActionPayload::class.java)
 
     companion object {
         private const val TAG = "AttendanceSyncWorker"
@@ -124,10 +130,24 @@ class AttendanceSyncWorker(
                 }
             }
 
-            // 3. Prune old synced events (older than 7 days)
+            // 3. Process pending supervisor actions (proxy clock, approvals, leave reviews)
+            val supervisorActionItems = dao.getAllUnsyncedSupervisorActions()
+            for (action in supervisorActionItems) {
+                if (action.syncStatus == SyncStatus.FAILED) continue
+                val now = System.currentTimeMillis()
+                if (action.nextRetryAtEpochMs > now) continue
+
+                val success = syncSupervisorActionItem(action)
+                if (!success) {
+                    hadTransientErrors = true
+                }
+            }
+
+            // 4. Prune old synced events (older than 7 days)
             val weekAgoMs = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7)
             dao.pruneSyncedAttendanceEvents(weekAgoMs)
             dao.pruneSyncedLeaveRequests(weekAgoMs)
+            dao.pruneSyncedSupervisorActions(weekAgoMs)
 
             if (hadTransientErrors) {
                 Log.w(TAG, "Worker completed with some transient errors. Requesting retry.")
@@ -266,6 +286,57 @@ class AttendanceSyncWorker(
                         lastError = result.message,
                         nextRetryAtEpochMs = nextRetry
                     )
+                )
+                false
+            }
+        }
+    }
+
+    private suspend fun syncSupervisorActionItem(item: PendingSupervisorActionEntity): Boolean {
+        dao.updateSupervisorAction(item.copy(syncStatus = SyncStatus.SYNCING))
+
+        val result: BackendResult<*> = when (item.actionType) {
+            SupervisorActionType.PROXY_CLOCK_IN, SupervisorActionType.PROXY_CLOCK_OUT -> {
+                val payload = runCatching { proxyClockPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) {
+                    BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                } else {
+                    val selfieFile = item.selfieLocalPath?.let { File(it) }
+                    val storageUrl = if (selfieFile != null && selfieFile.exists()) storageService.uploadSelfieFile(selfieFile).getOrNull() else null
+                    val selfiePayload = storageUrl ?: item.selfieLocalPath?.let { com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(it) }
+                    if (item.actionType == SupervisorActionType.PROXY_CLOCK_IN) {
+                        repository.proxyClockIn(payload.employeeId, payload.latitude, payload.longitude, selfiePayload)
+                    } else {
+                        repository.proxyClockOut(payload.employeeId, payload.latitude, payload.longitude, selfiePayload)
+                    }
+                }
+            }
+            SupervisorActionType.ATTENDANCE_APPROVAL -> {
+                val payload = runCatching { attendanceApprovalPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                else repository.updateAttendanceApprovalStatus(payload.shiftId, if (payload.approve) "APPROVED" else "REJECTED", payload.comment)
+            }
+            SupervisorActionType.LEAVE_REVIEW -> {
+                val payload = runCatching { leaveReviewPayloadAdapter.fromJson(item.payloadJson) }.getOrNull()
+                if (payload == null) BackendResult.Failure("Corrupt queued action payload", isNetworkError = false)
+                else repository.reviewLeave(payload.leaveId, payload.approve, payload.comment)
+            }
+            else -> BackendResult.Failure("Unknown queued action type: ${item.actionType}", isNetworkError = false)
+        }
+
+        return when (result) {
+            is BackendResult.Success -> {
+                dao.updateSupervisorAction(item.copy(syncStatus = SyncStatus.SYNCED, syncedAtEpochMs = System.currentTimeMillis(), lastError = null))
+                item.selfieLocalPath?.let { runCatching { File(it).delete() } }
+                true
+            }
+            is BackendResult.Failure -> {
+                val attempts = item.attempts + 1
+                val newStatus = if (result.isNetworkError) SyncStatus.PENDING else SyncStatus.FAILED
+                val delaySeconds = min(30.0 * 2.0.pow(attempts - 1), 30 * 60.0)
+                val nextRetry = System.currentTimeMillis() + (delaySeconds * 1000).toLong()
+                dao.updateSupervisorAction(
+                    item.copy(syncStatus = newStatus, attempts = attempts, lastError = result.message, nextRetryAtEpochMs = nextRetry)
                 )
                 false
             }

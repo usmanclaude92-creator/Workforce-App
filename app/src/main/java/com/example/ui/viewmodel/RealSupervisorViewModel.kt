@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
 import com.example.data.repository.IWorkforceRepository
+import com.example.data.sync.OfflineCache
+import com.example.data.sync.RealSyncManager
+import com.example.data.sync.SupervisorActionType
+import com.example.data.sync.SyncQueueStatus
 import com.example.location.LocationHelper
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceApprovalDto
@@ -45,18 +49,29 @@ data class RealSupervisorUiState(
     val isProcessing: Boolean = false,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
-    val selfieUrlCache: Map<String, String> = emptyMap()
+    val selfieUrlCache: Map<String, String> = emptyMap(),
+    val syncQueue: SyncQueueStatus = SyncQueueStatus()
 )
 
 class RealSupervisorViewModel(
     private val repository: IWorkforceRepository,
-    private val locationHelper: LocationHelper
+    private val locationHelper: LocationHelper,
+    private val syncManager: RealSyncManager,
+    private val offlineCache: OfflineCache,
+    private val supervisorId: String
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RealSupervisorUiState())
     val uiState: StateFlow<RealSupervisorUiState> = _uiState.asStateFlow()
 
     init {
+        syncManager.start(viewModelScope)
+        viewModelScope.launch {
+            syncManager.status.collect { status ->
+                _uiState.value = _uiState.value.copy(syncQueue = status)
+            }
+        }
+        viewModelScope.launch { syncManager.refreshCounts() }
         refresh()
     }
 
@@ -68,20 +83,48 @@ class RealSupervisorViewModel(
                 is BackendResult.Failure -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
             when (val result = repository.pendingAttendanceApprovals()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingAttendanceApprovals = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cachePendingAttendanceApprovals(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(pendingAttendanceApprovals = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedPendingAttendanceApprovals(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(pendingAttendanceApprovals = it)
+                    }
+                }
             }
             when (val result = repository.pendingLeave()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(pendingLeave = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cachePendingLeave(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(pendingLeave = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedPendingLeave(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(pendingLeave = it)
+                    }
+                }
             }
             when (val result = repository.attendanceRoster()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(attendanceRoster = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cacheAttendanceRoster(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(attendanceRoster = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedAttendanceRoster(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(attendanceRoster = it)
+                    }
+                }
             }
             when (val result = repository.sites()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(sites = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cacheSites(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(sites = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedSites(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(sites = it)
+                    }
+                }
             }
             when (val result = repository.supervisorMetrics()) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(metrics = result.value)
@@ -92,12 +135,26 @@ class RealSupervisorViewModel(
                 is BackendResult.Failure -> {}
             }
             when (val result = repository.teamRoster()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(teamRoster = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cacheTeamRoster(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(teamRoster = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedTeamRoster(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(teamRoster = it)
+                    }
+                }
             }
             when (val result = repository.myProfile()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(profile = result.value)
-                is BackendResult.Failure -> {}
+                is BackendResult.Success -> {
+                    offlineCache.cacheProfile(supervisorId, result.value)
+                    _uiState.value = _uiState.value.copy(profile = result.value)
+                }
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) offlineCache.getCachedProfile(supervisorId)?.let {
+                        _uiState.value = _uiState.value.copy(profile = it)
+                    }
+                }
             }
             _uiState.value = _uiState.value.copy(isLoading = false)
         }
@@ -178,13 +235,22 @@ class RealSupervisorViewModel(
             val location = locationHelper.getCurrentLocation()
             val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
             val result = repository.proxyClockIn(employeeId, location?.latitude, location?.longitude, selfieBase64)
-            runCatching { File(selfieFilePath).delete() }
             when (result) {
                 is BackendResult.Success -> {
+                    runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-in recorded.")
                     refresh()
                 }
-                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) {
+                        syncManager.queueProxyClockEvent(SupervisorActionType.PROXY_CLOCK_IN, employeeId, location?.latitude, location?.longitude, selfieFilePath)
+                        runCatching { File(selfieFilePath).delete() }
+                        _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Offline — clock-in queued and will sync automatically.")
+                    } else {
+                        runCatching { File(selfieFilePath).delete() }
+                        _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                    }
+                }
             }
         }
     }
@@ -196,13 +262,22 @@ class RealSupervisorViewModel(
             val location = locationHelper.getCurrentLocation()
             val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
             val result = repository.proxyClockOut(employeeId, location?.latitude, location?.longitude, selfieBase64)
-            runCatching { File(selfieFilePath).delete() }
             when (result) {
                 is BackendResult.Success -> {
+                    runCatching { File(selfieFilePath).delete() }
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-out recorded.")
                     refresh()
                 }
-                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) {
+                        syncManager.queueProxyClockEvent(SupervisorActionType.PROXY_CLOCK_OUT, employeeId, location?.latitude, location?.longitude, selfieFilePath)
+                        runCatching { File(selfieFilePath).delete() }
+                        _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Offline — clock-out queued and will sync automatically.")
+                    } else {
+                        runCatching { File(selfieFilePath).delete() }
+                        _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                    }
+                }
             }
         }
     }
@@ -313,8 +388,16 @@ class RealSupervisorViewModel(
                     refresh()
                 }
                 is BackendResult.Failure -> {
-                    // Fallback to reviewAttendance if direct approval endpoint reported failure
-                    reviewAttendance(shiftId, approve, comment, context, supervisorName)
+                    if (result.isNetworkError) {
+                        syncManager.queueAttendanceApproval(shiftId, approve, comment)
+                        _uiState.value = _uiState.value.copy(
+                            isProcessing = false,
+                            statusMessage = "Offline — ${if (approve) "approval" else "rejection"} queued and will sync automatically."
+                        )
+                    } else {
+                        // Fallback to reviewAttendance if direct approval endpoint reported a non-network rejection
+                        reviewAttendance(shiftId, approve, comment, context, supervisorName)
+                    }
                 }
             }
         }
@@ -328,7 +411,17 @@ class RealSupervisorViewModel(
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = if (approve) "Leave approved." else "Leave rejected.")
                     refresh()
                 }
-                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                is BackendResult.Failure -> {
+                    if (result.isNetworkError) {
+                        syncManager.queueLeaveReview(leaveId, approve, comment)
+                        _uiState.value = _uiState.value.copy(
+                            isProcessing = false,
+                            statusMessage = "Offline — leave ${if (approve) "approval" else "rejection"} queued and will sync automatically."
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+                    }
+                }
             }
         }
     }

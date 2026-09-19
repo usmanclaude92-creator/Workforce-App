@@ -11,8 +11,8 @@ import androidx.room.RoomDatabase
  * awaiting the Artify Central Backend, not a self-contained fake dataset.
  */
 @Database(
-    entities = [PendingAttendanceEventEntity::class, PendingLeaveRequestEntity::class, CachedJsonEntity::class],
-    version = 2,
+    entities = [PendingAttendanceEventEntity::class, PendingLeaveRequestEntity::class, CachedJsonEntity::class, PendingSupervisorActionEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class RealSyncDatabase : RoomDatabase() {

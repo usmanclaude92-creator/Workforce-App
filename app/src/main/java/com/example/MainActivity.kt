@@ -168,8 +168,12 @@ fun ArtifyAppRoot() {
                 Box(modifier = Modifier.weight(1f)) {
                     if (signedInEmployee.role == "SUPERVISOR" || signedInEmployee.role == "ADMIN") {
                         val supervisorLocationHelper = remember { LocationHelper(context) }
+                        val supervisorSyncManager = remember(signedInEmployee.id) {
+                            RealSyncManager(context, workforceRepository, NetworkMonitor(context), signedInEmployee.id)
+                        }
+                        val supervisorOfflineCache = remember { OfflineCache(context) }
                         val supervisorViewModel = remember(signedInEmployee.id) {
-                            RealSupervisorViewModel(workforceRepository, supervisorLocationHelper)
+                            RealSupervisorViewModel(workforceRepository, supervisorLocationHelper, supervisorSyncManager, supervisorOfflineCache, signedInEmployee.id)
                         }
                         RealSupervisorDashboardScreen(
                             viewModel = supervisorViewModel,

@@ -65,3 +65,38 @@ data class PendingLeaveRequestEntity(
     val nextRetryAtEpochMs: Long = 0L,
     val syncedAtEpochMs: Long? = null
 )
+
+/** Action types a supervisor can perform against a team member's attendance/leave while offline. */
+object SupervisorActionType {
+    const val PROXY_CLOCK_IN = "PROXY_CLOCK_IN"
+    const val PROXY_CLOCK_OUT = "PROXY_CLOCK_OUT"
+    const val ATTENDANCE_APPROVAL = "ATTENDANCE_APPROVAL"
+    const val LEAVE_REVIEW = "LEAVE_REVIEW"
+}
+
+/**
+ * A queued supervisor action (proxy clock-in/out for a team member, attendance approval/
+ * rejection, leave approval/rejection) captured while offline. [payloadJson] holds the
+ * action-specific fields (see [SupervisorActionType]) so one table/queue covers all four,
+ * the same idempotent-retry guarantee as the worker's own queues via [clientActionId].
+ */
+@Entity(
+    tableName = "pending_supervisor_actions",
+    indices = [
+        Index(value = ["supervisorId", "syncStatus"]),
+        Index(value = ["queuedAtEpochMs"])
+    ]
+)
+data class PendingSupervisorActionEntity(
+    @PrimaryKey val clientActionId: String,
+    val supervisorId: String,
+    val actionType: String,
+    val payloadJson: String,
+    val selfieLocalPath: String? = null,
+    val queuedAtEpochMs: Long,
+    val syncStatus: String,
+    val attempts: Int = 0,
+    val lastError: String? = null,
+    val nextRetryAtEpochMs: Long = 0L,
+    val syncedAtEpochMs: Long? = null
+)
