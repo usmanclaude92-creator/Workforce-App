@@ -368,12 +368,6 @@ private fun PinLoginContent(
         )
         Spacer(modifier = Modifier.height(14.dp))
         Text("SIGN IN", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(
-            "Enter your Civil ID and PIN. Required every time, on any device.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.5.sp,
-            modifier = Modifier.padding(top = 6.dp)
-        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -419,13 +413,6 @@ private fun PinLoginContent(
             if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
             else Text("LOGIN", fontWeight = FontWeight.Bold)
         }
-
-        Text(
-            "First time on this device? Just sign in — we'll set up your PIN automatically.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 10.dp)
-        )
 
         Spacer(modifier = Modifier.height(22.dp))
         HorizontalDivider()
