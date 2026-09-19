@@ -457,14 +457,14 @@ fun RealSupervisorDashboardScreen(
         // NOTE: previously fell back to fabricated names ("Hamad Al-Sabah", "Al-Ahmadi Refinery
         // Expansion", etc.) whenever the real roster/sites hadn't loaded yet, letting a supervisor
         // submit a real shift assignment against a fictional employee/site. Now these lists are
-        // real-data-only or empty; AssignShiftScheduleDialog disables submission until real data exists.
+        // real-data-only or empty; AssignShiftScheduleScreen disables submission until real data exists.
         val availableWorkers: List<Pair<String, String>> = uiState.attendanceRoster.mapNotNull { it.employee }
             .filter { !it.employeeCode.isNullOrBlank() }
             .distinctBy { it.employeeCode }
             .map { it.employeeCode.orEmpty() to it.fullName }
         val availableSites = uiState.sites.map { it.name }
 
-        AssignShiftScheduleDialog(
+        AssignShiftScheduleScreen(
             initialWorker = assignShiftWorker,
             availableWorkers = availableWorkers,
             availableSites = availableSites,
@@ -2312,7 +2312,7 @@ private fun ProfileSectionLabel(text: String, modifier: Modifier = Modifier.fill
 }
 
 @Composable
-fun AssignShiftScheduleDialog(
+fun AssignShiftScheduleScreen(
     initialWorker: AttendanceShiftDto? = null,
     availableWorkers: List<Pair<String, String>>,
     availableSites: List<String>,
@@ -2356,21 +2356,19 @@ fun AssignShiftScheduleDialog(
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = surfaceColor,
-            border = BorderStroke(1.dp, borderColor),
+    // Rendered as a compact, full-width screen (not a floating popup dialog) -- it fully
+    // covers the tab content beneath it as a later sibling in the parent layout, the same
+    // way SupervisorPendingApprovalsScreen replaces the dashboard's Scaffold.
+    Surface(
+        color = surfaceColor,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxSize()
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2846,7 +2844,6 @@ fun AssignShiftScheduleDialog(
                 }
             }
         }
-    }
 }
 
 @Composable
