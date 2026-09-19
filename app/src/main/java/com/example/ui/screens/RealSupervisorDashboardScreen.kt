@@ -70,6 +70,9 @@ fun RealSupervisorDashboardScreen(
     // Home-tab attendance: holds the just-captured selfie file path while the "whose
     // attendance is this?" picker is shown, before the actual punch is submitted.
     var pendingAttendanceSelfiePath by remember { mutableStateOf<String?>(null) }
+    // Home-tab attendance: the person to end a shift for, tapped directly from the
+    // Ongoing Shifts list (id = null means the supervisor's own shift).
+    var endShiftTarget by remember { mutableStateOf<Pair<String?, String>?>(null) }
 
     val context = LocalContext.current
     val supervisorPrefs = remember(supervisorCode) {
@@ -228,8 +231,10 @@ fun RealSupervisorDashboardScreen(
                     when (tab) {
                         SupTab.HOME -> HomeTab(
                             uiState = uiState,
+                            supervisorName = supervisorName,
                             onOpenPendingApprovals = { showPendingApprovalsScreen = true },
-                            onRequestAttendanceCamera = { viewModel.setAttendanceCameraDialog(true) }
+                            onRequestAttendanceCamera = { viewModel.setAttendanceCameraDialog(true) },
+                            onRequestEndShift = { targetId, targetName -> endShiftTarget = targetId to targetName }
                         )
                         SupTab.ROSTER -> RosterTab(
                             uiState = uiState,
@@ -338,12 +343,15 @@ fun RealSupervisorDashboardScreen(
     val supervisorProjectName = uiState.profile?.projectName ?: uiState.myShift?.project?.name ?: "Assigned Site"
     val supervisorShiftOpen = uiState.myShift?.status == "OPEN"
 
-    // Home tab attendance: capture the selfie FIRST (default framing is the supervisor's
-    // own current shift state), THEN ask who it's for -- see AttendanceTargetPickerDialog
-    // below, which resolves the actual clock-in/out action once a target is chosen.
+    // Home tab attendance -- two independent selfie flows:
+    // 1) START: the main button always opens this, regardless of who's currently on
+    //    shift, so it's ready to punch the NEXT person in every time. The target picker
+    //    afterwards only offers people who are not already clocked in.
+    // 2) END: triggered directly from a specific row in the Ongoing Shifts list below
+    //    (endShiftTarget), so the target is already known and no picker is needed.
     if (uiState.showAttendanceCameraDialog) {
         CameraXSelfieDialog(
-            eventType = if (supervisorShiftOpen) ShiftEventType.END_SHIFT else ShiftEventType.START_SHIFT,
+            eventType = ShiftEventType.START_SHIFT,
             projectName = supervisorProjectName,
             employeeName = supervisorName,
             onDismiss = { viewModel.setAttendanceCameraDialog(false) },
@@ -356,21 +364,27 @@ fun RealSupervisorDashboardScreen(
     pendingAttendanceSelfiePath?.let { path ->
         AttendanceTargetPickerDialog(
             supervisorName = supervisorName,
-            supervisorShiftOpen = supervisorShiftOpen,
-            teamRoster = uiState.teamRoster,
+            supervisorEligible = !supervisorShiftOpen,
+            teamRoster = uiState.teamRoster.filter { it.openShiftId == null },
             onDismiss = {
                 runCatching { java.io.File(path).delete() }
                 pendingAttendanceSelfiePath = null
             },
             onConfirm = { targetId ->
                 pendingAttendanceSelfiePath = null
-                if (targetId == null) {
-                    if (supervisorShiftOpen) viewModel.clockOutSelf(path) else viewModel.clockInSelf(path)
-                } else {
-                    val member = uiState.teamRoster.find { it.id == targetId }
-                    if (member?.openShiftId != null) viewModel.proxyClockOut(targetId, path)
-                    else viewModel.proxyClockIn(targetId, path)
-                }
+                if (targetId == null) viewModel.clockInSelf(path) else viewModel.proxyClockIn(targetId, path)
+            }
+        )
+    }
+    endShiftTarget?.let { (targetId, targetName) ->
+        CameraXSelfieDialog(
+            eventType = ShiftEventType.END_SHIFT,
+            projectName = supervisorProjectName,
+            employeeName = targetName,
+            onDismiss = { endShiftTarget = null },
+            onCaptureComplete = { path ->
+                endShiftTarget = null
+                if (targetId == null) viewModel.clockOutSelf(path) else viewModel.proxyClockOut(targetId, path)
             }
         )
     }
@@ -694,16 +708,20 @@ private fun ApproveCommentPrompt(onDismiss: () -> Unit, onConfirm: (String) -> U
 @Composable
 private fun HomeTab(
     uiState: RealSupervisorUiState,
+    supervisorName: String,
     onOpenPendingApprovals: (() -> Unit)? = null,
-    onRequestAttendanceCamera: () -> Unit = {}
+    onRequestAttendanceCamera: () -> Unit = {},
+    onRequestEndShift: (targetId: String?, targetName: String) -> Unit = { _, _ -> }
 ) {
     val isDark = LocalIsDarkTheme.current
     val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
     val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+    val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
 
     val myShiftOpen = uiState.myShift?.status == "OPEN"
+    val ongoingTeamMembers = uiState.teamRoster.filter { it.openShiftId != null }
 
     Column(
         modifier = Modifier
@@ -776,9 +794,10 @@ private fun HomeTab(
         Spacer(modifier = Modifier.height(18.dp))
 
         // Unified attendance card -- one selfie capture button, exactly like the Worker
-        // dashboard's Home hero button. Who the punch is actually recorded for (the
-        // supervisor themself, by default, or any employee on the same project) is
-        // chosen AFTER the photo is taken -- see AttendanceTargetPickerDialog.
+        // dashboard's Home hero button. It always starts a NEW punch (for the supervisor
+        // by default, or any project employee not already clocked in -- chosen AFTER the
+        // photo is taken, see AttendanceTargetPickerDialog); ending an ongoing shift is
+        // done per-person from the Ongoing Shifts list below instead.
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -793,10 +812,6 @@ private fun HomeTab(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = if (myShiftOpen) "You're clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}." else "Not currently clocked in.",
-                    fontSize = 12.sp, color = textSecondary
-                )
-                Text(
                     "Take a selfie to record your own attendance, or on behalf of any team member on your project.",
                     fontSize = 11.sp, color = textSecondary
                 )
@@ -805,15 +820,49 @@ private fun HomeTab(
                     onClick = onRequestAttendanceCamera,
                     enabled = !uiState.isProcessing,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (myShiftOpen) SophisticatedError else SophisticatedPrimary,
-                        contentColor = Color.White
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = SophisticatedPrimary, contentColor = Color.White),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (myShiftOpen) "End Shift with Selfie" else "Start Shift with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Start Shift with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Ongoing Shifts -- everyone currently clocked in (the supervisor, if on shift,
+        // plus any team member with an open shift). Each row ends that specific person's
+        // shift directly with its own selfie capture, no picker needed.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Groups, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Ongoing Shifts (${(if (myShiftOpen) 1 else 0) + ongoingTeamMembers.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (!myShiftOpen && ongoingTeamMembers.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                Text("No one is currently clocked in.", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (myShiftOpen) {
+                    OngoingShiftRow(
+                        name = "Myself ($supervisorName)",
+                        clockInTime = uiState.myShift?.clockIn?.serverTimestamp,
+                        enabled = !uiState.isProcessing,
+                        onEndShift = { onRequestEndShift(null, supervisorName) }
+                    )
+                }
+                ongoingTeamMembers.forEach { member ->
+                    OngoingShiftRow(
+                        name = "${member.fullName} (${member.employeeCode})",
+                        clockInTime = member.clockInTime,
+                        enabled = !uiState.isProcessing,
+                        onEndShift = { onRequestEndShift(member.id, member.fullName) }
+                    )
                 }
             }
         }
@@ -823,14 +872,59 @@ private fun HomeTab(
 }
 
 @Composable
+private fun OngoingShiftRow(
+    name: String,
+    clockInTime: String?,
+    enabled: Boolean,
+    onEndShift: () -> Unit
+) {
+    val isDark = LocalIsDarkTheme.current
+    val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
+        border = BorderStroke(1.dp, cardBorder)
+    ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
+                Text(
+                    "On shift since ${formatShiftTime(clockInTime) ?: "—"}",
+                    fontSize = 11.sp, color = SophisticatedSuccess
+                )
+            }
+            Button(
+                onClick = onEndShift,
+                enabled = enabled,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = SophisticatedError, contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("End Shift", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
 private fun AttendanceTargetPickerDialog(
     supervisorName: String,
-    supervisorShiftOpen: Boolean,
-    teamRoster: List<NoMobileWorkerDto>,
+    supervisorEligible: Boolean, // false = supervisor already has an open shift
+    teamRoster: List<NoMobileWorkerDto>, // pre-filtered to employees NOT already clocked in
     onDismiss: () -> Unit,
     onConfirm: (targetEmployeeId: String?) -> Unit // null = the supervisor themself
 ) {
-    var selectedId by remember { mutableStateOf<String?>(null) } // null = Myself
+    // Default to Myself when eligible, otherwise the first eligible team member.
+    var selectedId by remember(supervisorEligible, teamRoster) {
+        mutableStateOf(if (supervisorEligible) null else teamRoster.firstOrNull()?.id)
+    }
+    val nothingEligible = !supervisorEligible && teamRoster.isEmpty()
     val isDark = LocalIsDarkTheme.current
     val surfaceColor = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
     val borderColor = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
@@ -847,7 +941,7 @@ private fun AttendanceTargetPickerDialog(
             Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
                 Text("Whose Attendance Is This?", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textPrimary)
                 Text(
-                    "Confirm who the selfie you just captured records attendance for.",
+                    "Confirm who the selfie you just captured starts a shift for.",
                     fontSize = 12.sp, color = textSecondary
                 )
                 Spacer(modifier = Modifier.height(14.dp))
@@ -856,24 +950,25 @@ private fun AttendanceTargetPickerDialog(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AttendanceTargetRow(
-                        title = "Myself ($supervisorName)",
-                        subtitle = if (supervisorShiftOpen) "Will clock out" else "Will clock in",
-                        selected = selectedId == null,
-                        onClick = { selectedId = null }
-                    )
+                    if (supervisorEligible) {
+                        AttendanceTargetRow(
+                            title = "Myself ($supervisorName)",
+                            subtitle = "Will clock in",
+                            selected = selectedId == null,
+                            onClick = { selectedId = null }
+                        )
+                    }
                     teamRoster.forEach { member ->
-                        val isOpen = member.openShiftId != null
                         AttendanceTargetRow(
                             title = member.fullName,
-                            subtitle = "${member.employeeCode} · ${member.role} · ${if (isOpen) "Will clock out" else "Will clock in"}",
+                            subtitle = "${member.employeeCode} · ${member.role} · Will clock in",
                             selected = selectedId == member.id,
                             onClick = { selectedId = member.id }
                         )
                     }
-                    if (teamRoster.isEmpty()) {
+                    if (nothingEligible) {
                         Text(
-                            "No other employees found on your project.",
+                            "Everyone on your project is already clocked in.",
                             fontSize = 12.sp, color = textSecondary,
                             modifier = Modifier.padding(top = 8.dp)
                         )
@@ -887,6 +982,7 @@ private fun AttendanceTargetPickerDialog(
                     }
                     Button(
                         onClick = { onConfirm(selectedId) },
+                        enabled = supervisorEligible || selectedId != null,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SophisticatedPrimary, contentColor = Color.White)
