@@ -252,6 +252,9 @@ serve(async (req: Request) => {
         clock_out_event_id: isCompleted ? (dbShift.clock_out_event_id ?? crypto.randomUUID()) : null,
         total_worked_minutes: dbShift.total_worked_minutes ?? null,
         status: dbShift.status ?? "OPEN",
+        // The shift's own approval state (PENDING/APPROVED/REJECTED, null on a still-OPEN
+        // shift) -- distinct from `status` above, which only ever tracks OPEN/COMPLETED.
+        approval_status: dbShift.approval_status ?? null,
         compliance_flag: g.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
         reviewed_by: dbShift.reviewed_by ?? null,
         reviewed_at: dbShift.reviewed_at ?? null,

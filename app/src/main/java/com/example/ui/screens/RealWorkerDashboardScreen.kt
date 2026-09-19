@@ -41,7 +41,6 @@ import com.example.model.ShiftEventType
 import com.example.network.AttendanceShiftDto
 import com.example.network.LeaveRequestDto
 import com.example.network.NotificationDto
-import com.example.security.SecureSessionStore
 import com.example.ui.components.ArtifyTopHeader
 import com.example.ui.components.CameraXSelfieDialog
 import com.example.ui.components.SelfieVerificationDialog
@@ -427,16 +426,17 @@ private fun ShiftTab(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = if (isQueuedLocally) "Captured offline — will sync automatically."
-                    else if (active != null) "✓ Official Server Timestamp & Biometric Recorded"
-                    else "Ready to record selfie biometric attendance.",
-                    fontSize = 10.5.sp,
-                    color = if (active != null) SophisticatedSuccess else textMuted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (isQueuedLocally || active != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isQueuedLocally) "Captured offline — will sync automatically."
+                        else "✓ Official Server Timestamp & Biometric Recorded",
+                        fontSize = 10.5.sp,
+                        color = if (active != null) SophisticatedSuccess else textMuted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 if (isQueuedLocally) {
                     Spacer(modifier = Modifier.height(8.dp))
                     StatusPill("QUEUED")
@@ -578,6 +578,15 @@ private fun StatTile(label: String, value: String, icon: androidx.compose.ui.gra
     }
 }
 
+/**
+ * A completed shift's review state for badge display -- distinct from `shift.status`
+ * (which only ever tracks OPEN/COMPLETED): OPEN while in progress, otherwise the real
+ * `approval_status` from the server, or PENDING_REVIEW when a completed shift hasn't
+ * been reviewed yet.
+ */
+private fun shiftApprovalStatus(shift: AttendanceShiftDto): String =
+    if (shift.status == "OPEN") "OPEN" else (shift.approvalStatus ?: "PENDING_REVIEW")
+
 @Composable
 private fun ShiftHistoryCard(shift: AttendanceShiftDto) {
     val isDark = LocalIsDarkTheme.current
@@ -585,7 +594,6 @@ private fun ShiftHistoryCard(shift: AttendanceShiftDto) {
     val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
-    val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -611,14 +619,10 @@ private fun ShiftHistoryCard(shift: AttendanceShiftDto) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(formatDisplayDateDDMMYYYY(shift.shiftDate), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
                 }
-                ShiftStatusBadge(shift.status)
+                ShiftStatusBadge(shiftApprovalStatus(shift))
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text("Worked: ${formatShiftDurationHrsMins(shift.totalWorkedMinutes)}", fontSize = 12.sp, color = textSecondary)
-            shift.reviewComment?.let {
-                Spacer(modifier = Modifier.height(3.dp))
-                Text("Supervisor: $it", fontSize = 11.sp, color = textMuted)
-            }
         }
     }
 }
@@ -663,7 +667,7 @@ private fun ShiftStatusBadge(status: String) {
         "PENDING_REVIEW", "PENDING" -> Tuple4(
             if (isDark) SophisticatedWarningContainer else SophisticatedLightWarningContainer,
             if (isDark) SophisticatedWarning else SophisticatedLightWarning,
-            "PENDING REVIEW",
+            "UNDER REVIEW",
             Icons.Default.HourglassEmpty
         )
         "OPEN" -> Tuple4(
@@ -827,8 +831,8 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
         val matchesFilter = when (filter) {
             "ALL" -> true
             "COMPLETED" -> s.status != "OPEN"
-            "PENDING" -> s.status == "PENDING" || s.status == "PENDING_REVIEW"
-            else -> s.status == filter
+            "PENDING" -> shiftApprovalStatus(s) == "PENDING_REVIEW"
+            else -> shiftApprovalStatus(s) == filter
         }
         val formattedDate = formatDisplayDateDDMMYYYY(s.shiftDate)
         val matchesQuery = query.isBlank() || s.shiftDate.contains(query, ignoreCase = true) || formattedDate.contains(query, ignoreCase = true) || s.status.contains(query, ignoreCase = true)
@@ -846,9 +850,9 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
             val totalMinutes = allShifts.sumOf { it.totalWorkedMinutes ?: 0 }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MiniStatCard("Completed", allShifts.count { it.status != "OPEN" }.toString(), "Total Shifts", Icons.Default.CheckCircle, Modifier.weight(1f))
-            MiniStatCard("Approved", allShifts.count { it.status == "APPROVED" }.toString(), "Verified", Icons.Default.CheckCircle, Modifier.weight(1f))
+            MiniStatCard("Approved", allShifts.count { shiftApprovalStatus(it) == "APPROVED" }.toString(), "Verified", Icons.Default.CheckCircle, Modifier.weight(1f))
             MiniStatCard("Hours", String.format(java.util.Locale.US, "%.1f", totalMinutes / 60.0), "Total Logged", Icons.Default.Schedule, Modifier.weight(1f))
-            MiniStatCard("Pending", allShifts.count { it.status == "PENDING" || it.status == "PENDING_REVIEW" }.toString(), "In Review", Icons.Default.HourglassEmpty, Modifier.weight(1f))
+            MiniStatCard("Pending", allShifts.count { shiftApprovalStatus(it) == "PENDING_REVIEW" }.toString(), "In Review", Icons.Default.HourglassEmpty, Modifier.weight(1f))
         }
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -945,7 +949,7 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                         Text(shift.project?.name ?: "—", fontSize = 11.sp, color = textSecondary)
                                     }
                                 }
-                                ShiftStatusBadge(shift.status)
+                                ShiftStatusBadge(shiftApprovalStatus(shift))
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Surface(
@@ -976,30 +980,6 @@ private fun DailyLogsTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewMo
                                     Column(modifier = Modifier.weight(1f).padding(start = 10.dp), horizontalAlignment = Alignment.End) {
                                         Text("DURATION", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = textMuted)
                                         Text(formatShiftDurationHrsMins(shift.totalWorkedMinutes), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SophisticatedPrimary)
-                                    }
-                                }
-                            }
-                            shift.reviewComment?.let {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                val isRejected = shift.status == "REJECTED"
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isRejected) SophisticatedErrorContainer else SophisticatedSuccessContainer,
-                                    border = BorderStroke(1.dp, if (isRejected) SophisticatedError.copy(alpha = 0.4f) else SophisticatedSuccessBorder),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            if (isRejected) Icons.Default.ErrorOutline else Icons.Default.CheckCircle,
-                                            contentDescription = null,
-                                            tint = if (isRejected) SophisticatedError else SophisticatedSuccess,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            "Supervisor: $it", fontSize = 10.5.sp,
-                                            color = if (isRejected) SophisticatedError else SophisticatedSuccess
-                                        )
                                     }
                                 }
                             }
@@ -1043,7 +1023,7 @@ private fun AttendanceDetailDialog(shift: AttendanceShiftDto, uiState: RealWorke
             Column(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Shift Details", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textPrimary)
-                    ShiftStatusBadge(shift.status)
+                    ShiftStatusBadge(shiftApprovalStatus(shift))
                 }
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -1166,7 +1146,6 @@ private fun LeaveTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewModel)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Leave & Absence", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textPrimary)
-                    Text("Request leave types & track approval status", fontSize = 10.5.sp, color = textSecondary)
                 }
                 Button(
                     onClick = { showForm = true },
@@ -1230,8 +1209,6 @@ private fun LeaveTab(uiState: RealWorkerUiState, viewModel: RealWorkerViewModel)
                         if (uiState.leaveHistory.isEmpty()) "No leave requests submitted yet" else "No requests match this filter",
                         fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("Submit a Sick, Casual, Annual, or Transit leave request", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(18.dp))
                     Button(
                         onClick = { showForm = true },
@@ -1481,7 +1458,6 @@ private fun ProfileTab(
     val themeSettings by themePreferences.settings.collectAsState()
     val isSystemDark = LocalIsDarkTheme.current
     var showThemeDialog by remember { mutableStateOf(false) }
-    val deviceId = remember { SecureSessionStore.getInstance(context).deviceId }
 
     val isDark = LocalIsDarkTheme.current
     val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
@@ -1663,39 +1639,12 @@ private fun ProfileTab(
             border = BorderStroke(1.dp, cardBorder)
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "DISPLAY & ENVIRONMENT THEME",
-                        color = SophisticatedPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (isDark) SophisticatedPrimaryContainer else SophisticatedLightPrimaryContainer
-                    ) {
-                        Text(
-                            text = if (isSystemDark) "DARK MODE" else "LIGHT MODE",
-                            color = SophisticatedPrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
                 Text(
-                    text = "High-contrast dynamic themes designed for bright daylight and night construction visibility.",
-                    color = textSecondary,
-                    fontSize = 12.sp
+                    text = "DISPLAY & ENVIRONMENT THEME",
+                    color = SophisticatedPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -1889,8 +1838,6 @@ private fun ProfileTab(
                 Spacer(modifier = Modifier.height(14.dp))
                 WorkAssignmentDetailRow(label = "Assigned Site", value = profile?.projectName ?: "—")
                 WorkAssignmentDetailRow(label = "Project Code", value = profile?.projectCode ?: "—")
-                WorkAssignmentDetailRow(label = "Assigned Geofence", value = profile?.geofenceRadiusMeters?.let { "${it.toInt()}m Geo-radius Active" } ?: "—")
-                WorkAssignmentDetailRow(label = "Hardware Biometric ID", value = deviceId.take(18) + "…")
             }
         }
 
@@ -1908,22 +1855,6 @@ private fun ProfileTab(
                 WorkAssignmentDetailRow("Phone", profile?.phone ?: "—")
                 WorkAssignmentDetailRow("Department", profile?.department ?: "—")
                 WorkAssignmentDetailRow("Account Status", if (profile != null) "Active" else "—")
-            }
-        }
-
-        // Security & Biometric
-        Spacer(modifier = Modifier.height(16.dp))
-        ProfileSectionLabel("SECURITY & BIOMETRIC VERIFICATION")
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = cardBg),
-            border = BorderStroke(1.dp, cardBorder),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                WorkAssignmentDetailRow("Device ID", deviceId.take(18) + "…")
-                WorkAssignmentDetailRow("Facial Biometrics", "Enrolled & Active")
-                WorkAssignmentDetailRow("Time Authority", "Authoritative server clock (UTC)")
             }
         }
 

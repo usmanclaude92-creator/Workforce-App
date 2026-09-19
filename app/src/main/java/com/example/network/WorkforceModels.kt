@@ -33,6 +33,7 @@ data class AttendanceShiftDto(
     @Json(name = "clock_out_event_id") val clockOutEventId: String? = null,
     @Json(name = "total_worked_minutes") val totalWorkedMinutes: Int? = null,
     val status: String,
+    @Json(name = "approval_status") val approvalStatus: String? = null,
     @Json(name = "compliance_flag") val complianceFlag: String,
     @Json(name = "reviewed_by") val reviewedBy: String? = null,
     @Json(name = "reviewed_at") val reviewedAt: String? = null,
