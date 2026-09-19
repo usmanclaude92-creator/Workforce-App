@@ -355,22 +355,24 @@ private fun PinLoginContent(
     var pin by remember { mutableStateOf("") }
     var showDemoPicker by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(72.dp))
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val sideMargin = maxWidth * 0.10f
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = sideMargin)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
         Image(
             painter = painterResource(
                 id = if (LocalIsDarkTheme.current) R.drawable.artify_full_logo_dark else R.drawable.artify_full_logo_light
             ),
             contentDescription = "Artify Human Capital Management System",
-            modifier = Modifier.height(76.dp)
+            modifier = Modifier.height(99.dp)
         )
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(64.dp))
         Text("SIGN IN", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -424,6 +426,7 @@ private fun PinLoginContent(
 
         DemoModeEntryCard(onClick = { showDemoPicker = true })
         Spacer(modifier = Modifier.height(30.dp))
+        }
     }
 
     if (showDemoPicker) {

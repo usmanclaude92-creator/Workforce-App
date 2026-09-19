@@ -156,7 +156,7 @@ fun ArtifyTopHeader(
                     Image(
                         painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.artify_logo_mark),
                         contentDescription = null,
-                        modifier = Modifier.size(44.dp)
+                        modifier = Modifier.size(53.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {

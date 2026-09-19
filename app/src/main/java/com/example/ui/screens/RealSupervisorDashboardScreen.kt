@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -1583,16 +1582,6 @@ private fun SitesTab(sites: List<SiteDto>) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(site.address ?: "—", fontSize = 12.sp, color = textSecondary)
                             Text("Geofence: ${site.geofenceRadiusMeters.toInt()} m", fontSize = 11.sp, color = textMuted)
-                            if (!site.employees.isNullOrEmpty()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Assigned Workers: ${site.employees.joinToString(", ")}",
-                                    fontSize = 11.sp,
-                                    color = textSecondary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
                     }
                 }
