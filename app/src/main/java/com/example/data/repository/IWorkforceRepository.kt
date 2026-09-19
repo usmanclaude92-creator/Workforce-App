@@ -8,6 +8,7 @@ import com.example.network.AttendanceVerificationResponse
 import com.example.network.AuditLogDto
 import com.example.network.ErpEventDto
 import com.example.network.LeaveRequestDto
+import com.example.network.NoMobileWorkerDto
 import com.example.network.NotificationDto
 import com.example.network.ProfileDto
 import com.example.network.RosterEmployeeDto
@@ -102,4 +103,13 @@ interface IWorkforceRepository {
     ): BackendResult<AttendanceApprovalDto>
 
     suspend fun myAttendanceApprovals(): BackendResult<List<AttendanceApprovalDto>>
+
+    // Team members in the supervisor's scope who have no mobile device of their own
+    // (never completed device registration) -- the supervisor records their attendance
+    // on the Shift tab instead.
+    suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>>
+
+    suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto>
+
+    suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto>
 }

@@ -326,3 +326,30 @@ data class UpdateAttendanceApprovalResponse(
     val error: String? = null
 )
 
+// A team member the supervisor can record clock-in/out for on their own behalf --
+// someone in scope who has never completed device registration (no workforce_auth row),
+// i.e. genuinely has no mobile of their own to punch in with.
+@JsonClass(generateAdapter = true)
+data class NoMobileWorkerDto(
+    val id: String,
+    @Json(name = "employee_code") val employeeCode: String,
+    @Json(name = "full_name") val fullName: String,
+    val role: String,
+    @Json(name = "open_shift_id") val openShiftId: String? = null,
+    @Json(name = "clock_in_time") val clockInTime: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TeamWithoutMobileResponse(val workers: List<NoMobileWorkerDto>? = null, val error: String? = null)
+
+@JsonClass(generateAdapter = true)
+data class ProxyAttendanceRequest(
+    val action: String,
+    @Json(name = "employee_id") val employeeId: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ProxyAttendanceResponse(val shift: AttendanceShiftDto? = null, val error: String? = null)
+

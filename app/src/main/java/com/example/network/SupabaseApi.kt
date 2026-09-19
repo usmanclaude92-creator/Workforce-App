@@ -100,4 +100,13 @@ interface SupabaseApi {
 
     @POST("attendance")
     suspend fun myAttendanceApprovals(@Header("Authorization") bearerToken: String, @Body request: ActionRequest): Response<PendingAttendanceApprovalsResponse>
+
+    @POST("supervisor")
+    suspend fun teamWithoutMobile(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<TeamWithoutMobileResponse>
+
+    @POST("supervisor")
+    suspend fun proxyClockIn(@Header("Authorization") bearerToken: String, @Body request: ProxyAttendanceRequest): Response<ProxyAttendanceResponse>
+
+    @POST("supervisor")
+    suspend fun proxyClockOut(@Header("Authorization") bearerToken: String, @Body request: ProxyAttendanceRequest): Response<ProxyAttendanceResponse>
 }

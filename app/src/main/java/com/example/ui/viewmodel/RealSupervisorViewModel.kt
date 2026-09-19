@@ -8,9 +8,8 @@ import com.example.data.repository.IWorkforceRepository
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceApprovalDto
 import com.example.network.AttendanceShiftDto
-import com.example.network.AuditLogDto
-import com.example.network.ErpEventDto
 import com.example.network.LeaveRequestDto
+import com.example.network.NoMobileWorkerDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
 import com.example.notifications.FcmNotificationManager
@@ -18,6 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.util.UUID
 
 data class RealSupervisorUiState(
     val pendingAttendance: List<AttendanceShiftDto> = emptyList(),
@@ -25,9 +26,11 @@ data class RealSupervisorUiState(
     val pendingLeave: List<LeaveRequestDto> = emptyList(),
     val attendanceRoster: List<AttendanceShiftDto> = emptyList(),
     val sites: List<SiteDto> = emptyList(),
-    val auditLogs: List<AuditLogDto> = emptyList(),
-    val erpEvents: List<ErpEventDto> = emptyList(),
     val metrics: SupervisorMetricsDto = SupervisorMetricsDto(),
+    // Supervisor's own current shift (from myShifts -- the same endpoint the Worker
+    // dashboard uses), and the team members who have no mobile device of their own.
+    val myShift: AttendanceShiftDto? = null,
+    val noMobileWorkers: List<NoMobileWorkerDto> = emptyList(),
     val isLoading: Boolean = true,
     val isProcessing: Boolean = false,
     val statusMessage: String? = null,
@@ -67,16 +70,16 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(sites = result.value)
                 is BackendResult.Failure -> {}
             }
-            when (val result = repository.auditLog()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(auditLogs = result.value)
-                is BackendResult.Failure -> {}
-            }
-            when (val result = repository.erpOutbox()) {
-                is BackendResult.Success -> _uiState.value = _uiState.value.copy(erpEvents = result.value)
-                is BackendResult.Failure -> {}
-            }
             when (val result = repository.supervisorMetrics()) {
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(metrics = result.value)
+                is BackendResult.Failure -> {}
+            }
+            when (val result = repository.myShifts()) {
+                is BackendResult.Success -> _uiState.value = _uiState.value.copy(myShift = result.value.firstOrNull())
+                is BackendResult.Failure -> {}
+            }
+            when (val result = repository.teamWithoutMobile()) {
+                is BackendResult.Success -> _uiState.value = _uiState.value.copy(noMobileWorkers = result.value)
                 is BackendResult.Failure -> {}
             }
             _uiState.value = _uiState.value.copy(isLoading = false)
@@ -84,6 +87,74 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
     }
 
     fun clearFeedback() { _uiState.value = _uiState.value.copy(statusMessage = null, errorMessage = null) }
+
+    // -------------------- Supervisor's own attendance --------------------
+    // Reuses the same `attendance` clock_in/clock_out actions the Worker dashboard uses --
+    // a supervisor is also just an employee with their own device session.
+
+    fun clockInSelf(latitude: Double?, longitude: Double?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            val result = repository.clockIn(
+                clientEventId = UUID.randomUUID().toString(),
+                deviceTimestamp = Instant.now().toString(),
+                latitude = latitude, longitude = longitude,
+                accuracy = null, isMockLocation = false, selfieBase64 = null
+            )
+            when (result) {
+                is BackendResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clocked in.", myShift = result.value.shift)
+                }
+                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    fun clockOutSelf(latitude: Double?, longitude: Double?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            val result = repository.clockOut(
+                clientEventId = UUID.randomUUID().toString(),
+                deviceTimestamp = Instant.now().toString(),
+                latitude = latitude, longitude = longitude,
+                accuracy = null, isMockLocation = false, selfieBase64 = null
+            )
+            when (result) {
+                is BackendResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clocked out.", myShift = result.value.shift)
+                }
+                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // -------------------- Proxy attendance for workers without a mobile --------------------
+
+    fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            when (val result = repository.proxyClockIn(employeeId, latitude, longitude)) {
+                is BackendResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-in recorded.")
+                    refresh()
+                }
+                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            when (val result = repository.proxyClockOut(employeeId, latitude, longitude)) {
+                is BackendResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-out recorded.")
+                    refresh()
+                }
+                is BackendResult.Failure -> _uiState.value = _uiState.value.copy(isProcessing = false, errorMessage = result.message)
+            }
+        }
+    }
 
     fun loadSelfieUrl(storagePath: String) {
         if (_uiState.value.selfieUrlCache.containsKey(storagePath)) return
