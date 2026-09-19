@@ -17,7 +17,12 @@ android {
     applicationId = "com.artifysols.workforce"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
+    // Hardcoded forever blocks Android from treating a newer APK as an upgrade over an
+    // older one (a same-or-lower versionCode is rejected on install even with a matching
+    // signature). CI passes the strictly-increasing GitHub Actions run number as
+    // APP_VERSION_CODE (see .github/workflows/build-apk.yml); local/Studio builds fall
+    // back to 2, unchanged from before.
+    versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 2
     versionName = "1.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

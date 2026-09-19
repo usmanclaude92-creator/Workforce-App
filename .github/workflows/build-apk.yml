@@ -29,13 +29,33 @@ jobs:
           fi
           chmod +x gradlew
 
-      - name: Create Consistent Debug Keystore
+      # debug.keystore is committed at the repo root (see .gitignore) specifically so
+      # every build signs with the SAME certificate. It was accidentally deleted by an
+      # earlier commit, which is why this step went back to generating (and copying to
+      # ~/.android) a brand-new random keystore on every single run -- every build then
+      # carried a different signature, so installing a newer debug APK over an older one
+      # failed with Android's "App not installed as package conflicts with existing
+      # package". Only generate a fallback here if the committed file is ever missing
+      # again, and copy it into ~/.android too so both locations agree.
+      - name: Verify Debug Keystore
         run: |
           mkdir -p ~/.android
-          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          cp ~/.android/debug.keystore ./debug.keystore
+          if [ ! -f "debug.keystore" ]; then
+            echo "debug.keystore missing from repo -- generating a fallback (builds signed this way will NOT match prior installs)."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          else
+            keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep SHA256
+          fi
+          cp debug.keystore ~/.android/debug.keystore
 
+      # versionCode was hardcoded, which independently blocks Android from treating a
+      # newer APK as an upgrade over an older one (a same-or-lower versionCode is
+      # rejected on install even with a matching signature). The Actions run number
+      # strictly increases across builds, so it's a safe, deterministic versionCode for
+      # CI-built APKs; local/Studio builds fall back to the hardcoded default, unchanged.
       - name: Build Debug APK
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
