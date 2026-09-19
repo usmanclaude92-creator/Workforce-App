@@ -21,7 +21,8 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 // longitude per hour" solar-time rule, so the business date follows wherever a project's
 // own GPS coordinates actually are instead of a single hardcoded timezone string. Falls
 // back to Oman's fixed UTC+4 offset (Asia/Muscat has no DST) only when a project has no
-// coordinates configured yet.
+// coordinates configured yet. Kept identical to the same helper in `supervisor` so both
+// agree on what "today" and a shift's scheduled wall-clock times mean.
 const FALLBACK_UTC_OFFSET_HOURS = 4;
 function utcOffsetHoursFromLongitude(lon: number): number {
   return Math.round(lon / 15);
@@ -29,6 +30,60 @@ function utcOffsetHoursFromLongitude(lon: number): number {
 function localDateFromGps(iso: string, lon: number | null | undefined): string {
   const offsetHours = typeof lon === "number" && !isNaN(lon) ? utcOffsetHoursFromLongitude(lon) : FALLBACK_UTC_OFFSET_HOURS;
   return new Date(new Date(iso).getTime() + offsetHours * 3600000).toISOString().slice(0, 10);
+}
+function localTimeToUtcDate(dateStr: string, timeStr: string, lon: number | null | undefined): Date {
+  const offsetHours = typeof lon === "number" && !isNaN(lon) ? utcOffsetHoursFromLongitude(lon) : FALLBACK_UTC_OFFSET_HOURS;
+  const [h, m] = timeStr.split(":").map(Number);
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCHours(h - offsetHours, m, 0, 0);
+  return d;
+}
+function scheduledEndUtc(shiftDateStr: string, startTime: string, endTime: string, lon: number | null | undefined): Date {
+  const end = localTimeToUtcDate(shiftDateStr, endTime, lon);
+  if (endTime <= startTime) {
+    end.setUTCDate(end.getUTCDate() + 1);
+  }
+  return end;
+}
+
+// Shift resolution priority for an employee + attendance date -- kept identical to the
+// same helper in `supervisor` (and server/db.ts's resolveEmployeeShift) so a self-service
+// mobile clock-in and a supervisor-recorded proxy clock-in snapshot the same schedule:
+//   1. Individual Employee Shift Assignment (project-scoped one wins over an
+//      employee-wide one when both cover the date).
+//   2. Project Shift Assignment's default shift -- Project here also covers Head Office
+//      (it's project HO0001, not a separate concept).
+// Returns null if nothing applicable is configured -- never fabricated.
+async function resolveApplicableShift(supabase: any, employeeId: string, dateStr: string, projectId: string | null) {
+  const { data: individualRows } = await supabase
+    .from("employee_shift_assignments")
+    .select("project_id, shifts(*)")
+    .eq("employee_id", employeeId)
+    .eq("is_active", true)
+    .lte("effective_from", dateStr)
+    .or(`effective_to.is.null,effective_to.gte.${dateStr}`);
+
+  if (individualRows && individualRows.length > 0) {
+    const scoped = projectId ? individualRows.find((r: any) => r.project_id === projectId) : null;
+    const chosen = scoped ?? individualRows.find((r: any) => r.project_id === null);
+    if (chosen?.shifts) return chosen.shifts;
+  }
+
+  if (projectId) {
+    const { data: projectRow } = await supabase
+      .from("project_shift_assignments")
+      .select("shifts(*)")
+      .eq("project_id", projectId)
+      .eq("is_default", true)
+      .eq("is_active", true)
+      .lte("effective_from", dateStr)
+      .or(`effective_to.is.null,effective_to.gte.${dateStr}`)
+      .limit(1)
+      .maybeSingle();
+    if (projectRow?.shifts) return projectRow.shifts;
+  }
+
+  return null;
 }
 
 serve(async (req: Request) => {
@@ -55,11 +110,10 @@ serve(async (req: Request) => {
     }
 
     // Resolve the employee STRICTLY from a live, active session row for this exact
-    // token. Previous versions accepted a body-supplied employee_id/civil_id (letting
-    // any caller act as anyone) and, failing that, fell back to "the most recently
-    // active session on the whole system" (letting a request with no valid token at all
-    // authenticate as an arbitrary employee). Neither fallback exists here: an invalid
-    // or unrecognized token is rejected outright.
+    // token. Never a body-supplied employee_id/civil_id (letting any caller act as
+    // anyone), and never "the most recently active session on the whole system" as a
+    // fallback (letting a request with no valid token at all authenticate as an
+    // arbitrary employee). An invalid or unrecognized token is rejected outright.
     const { data: sess } = await supabase
       .from("device_sessions")
       .select("employee_id")
@@ -188,9 +242,7 @@ serve(async (req: Request) => {
 
     function formatShiftDto(dbShift: any, selfieUrl: string | null = null, geofence?: ReturnType<typeof evaluateGeofence>) {
       const isCompleted = dbShift.status === "COMPLETED";
-      // compliance_flag is the only geofence result actually stored on this table
-      // (there is no is_geofence_exception column -- see the clock-in insert above).
-      const g = geofence ?? { status: dbShift.geofence_status ?? "UNKNOWN", distance: dbShift.geofence_distance_meters ?? null, compliant: dbShift.compliance_flag === "VERIFIED", reason: null };
+      const g = geofence ?? { status: dbShift.geofence_status ?? "UNKNOWN", distance: dbShift.distance_from_project_meters ?? null, compliant: dbShift.compliance_flag === "VERIFIED", reason: null };
       return {
         id: dbShift.id,
         employee_id: emp.id,
@@ -198,17 +250,29 @@ serve(async (req: Request) => {
         shift_date: dbShift.shift_date ?? today,
         clock_in_event_id: dbShift.clock_in_event_id ?? crypto.randomUUID(),
         clock_out_event_id: isCompleted ? (dbShift.clock_out_event_id ?? crypto.randomUUID()) : null,
-        total_worked_minutes: dbShift.total_worked_minutes ?? (isCompleted ? 480 : null),
-        status: dbShift.status ?? "PENDING",
+        total_worked_minutes: dbShift.total_worked_minutes ?? null,
+        status: dbShift.status ?? "OPEN",
         compliance_flag: g.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
         reviewed_by: dbShift.reviewed_by ?? null,
         reviewed_at: dbShift.reviewed_at ?? null,
         review_comment: dbShift.review_comment ?? null,
+        // Schedule that applied on this shift's own date, snapshotted at clock-in --
+        // surfaced unchanged so the supervisor's Approvals tab can show Scheduled vs
+        // Actual. Never re-derived from the employee's CURRENT shift assignment; null
+        // when nothing was configured/applicable that day.
+        scheduled_shift_id: dbShift.scheduled_shift_id ?? null,
+        scheduled_start: dbShift.scheduled_start ?? null,
+        scheduled_end: dbShift.scheduled_end ?? null,
+        scheduled_break_minutes: dbShift.scheduled_break_minutes ?? null,
+        scheduled_standard_hours: dbShift.scheduled_standard_hours ?? null,
+        late_minutes: dbShift.late_minutes ?? null,
+        early_departure_minutes: dbShift.early_departure_minutes ?? null,
+        recorded_by: dbShift.recorded_by ?? null,
         clock_in: {
           server_timestamp: dbShift.clock_in_time ?? nowIso,
           geofence_status: g.status,
           distance_from_project_meters: g.distance,
-          selfie_storage_path: selfieUrl ?? "attendance-selfies/in.jpg",
+          selfie_storage_path: selfieUrl ?? dbShift.selfie_url ?? "attendance-selfies/in.jpg",
           is_mock_location: dbShift.is_mock_location ?? false,
           device_id: "mobile-device"
         },
@@ -275,6 +339,37 @@ serve(async (req: Request) => {
       const shiftId = crypto.randomUUID();
       const publicSelfieUrl = await resolveSelfieUrl(body, emp.id);
 
+      // Snapshot the schedule that applies TODAY, at the moment of clock-in -- never
+      // re-derived later from the employee's current assignment, which could have since
+      // changed. Absent entirely (all null) when nothing is configured for this employee/
+      // project/date, matching the real, honest "no schedule" state rather than a guess.
+      const scheduledShift = await resolveApplicableShift(supabase, emp.id, today, emp.assigned_project_id ?? null);
+      let scheduledFields: Record<string, unknown> = {
+        scheduled_shift_id: null,
+        scheduled_start: null,
+        scheduled_end: null,
+        scheduled_break_minutes: null,
+        scheduled_standard_hours: null,
+        scheduled_grace_in_minutes: null,
+        scheduled_grace_out_minutes: null,
+        late_minutes: null,
+      };
+      if (scheduledShift) {
+        const schedStartUtc = localTimeToUtcDate(today, scheduledShift.start_time, projectLon);
+        const rawLate = Math.round((new Date(nowIso).getTime() - schedStartUtc.getTime()) / 60000);
+        const lateMinutes = Math.max(0, rawLate - (scheduledShift.grace_in_minutes ?? 0));
+        scheduledFields = {
+          scheduled_shift_id: scheduledShift.id,
+          scheduled_start: scheduledShift.start_time,
+          scheduled_end: scheduledShift.end_time,
+          scheduled_break_minutes: scheduledShift.break_minutes,
+          scheduled_standard_hours: scheduledShift.standard_working_hours,
+          scheduled_grace_in_minutes: scheduledShift.grace_in_minutes,
+          scheduled_grace_out_minutes: scheduledShift.grace_out_minutes,
+          late_minutes: lateMinutes,
+        };
+      }
+
       const { data: newShift, error: insertErr } = await supabase
         .from("attendance_shifts")
         .insert({
@@ -283,10 +378,16 @@ serve(async (req: Request) => {
           project_id: emp.assigned_project_id ?? projectCode,
           shift_date: today,
           clock_in_event_id: clockInId,
-          status: "PENDING",
+          status: "OPEN",
           compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
           clock_in_time: nowIso,
-          selfie_url: publicSelfieUrl
+          selfie_url: publicSelfieUrl,
+          geofence_status: geofence.status,
+          distance_from_project_meters: geofence.distance,
+          latitude: deviceLat,
+          longitude: deviceLon,
+          is_mock_location: false,
+          ...scheduledFields,
         })
         .select()
         .single();
@@ -296,7 +397,6 @@ serve(async (req: Request) => {
         const projectIdForSup = emp.assigned_project_id ?? projectCode;
         const supervisorIds: string[] = [];
 
-        // Check project record
         const { data: projRecord } = await supabase
           .from("projects")
           .select("id, supervisor_id, manager_id")
@@ -305,7 +405,6 @@ serve(async (req: Request) => {
         if (projRecord?.supervisor_id) supervisorIds.push(String(projRecord.supervisor_id));
         if (projRecord?.manager_id) supervisorIds.push(String(projRecord.manager_id));
 
-        // Check project_supervisors table
         const { data: psRecords } = await supabase
           .from("project_supervisors")
           .select("supervisor_id")
@@ -317,7 +416,6 @@ serve(async (req: Request) => {
           }
         }
 
-        // Check supervisor employees assigned to this project
         const { data: supEmployees } = await supabase
           .from("employees")
           .select("id")
@@ -334,8 +432,8 @@ serve(async (req: Request) => {
           await supabase.from("notifications").insert({
             recipient_id: sId,
             type: "ATTENDANCE_PENDING",
-            title: `🔔 Pending Attendance: ${emp.employee_name}`,
-            message: `${emp.employee_name} submitted attendance for ${projectName} on ${today}. Tap to review and approve.`,
+            title: `🔔 ${emp.employee_name} clocked in`,
+            message: `${emp.employee_name} clocked in for ${projectName} on ${today}.`,
             created_at: nowIso
           });
         }
@@ -343,11 +441,9 @@ serve(async (req: Request) => {
         // Notification dispatch optional; do not fail clock-in
       }
 
-      // A failed insert must never look like a successful clock-in. Previously this
-      // fell back to a synthesized-in-memory shift object and still returned 200 --
-      // the phone showed "Shift started" while nothing was actually saved, with no
-      // error visible anywhere. Surface the real database error instead, and log it
-      // server-side so a future failure is diagnosable without guessing.
+      // A failed insert must never look like a successful clock-in. Surface the real
+      // database error instead, and log it server-side so a future failure is
+      // diagnosable without guessing.
       if (insertErr || !newShift) {
         console.error("[attendance] clock-in insert failed:", JSON.stringify(insertErr));
         return new Response(
@@ -384,51 +480,76 @@ serve(async (req: Request) => {
         );
       }
 
-      const clockOutId = crypto.randomUUID();
-
-      // The mobile app sends an end-of-shift selfie (selfie_base64) on clock-out. Stored
-      // in end_selfie_url, separate from selfie_url (the shift-start selfie), so the
-      // start selfie is never overwritten/lost when the shift ends -- both remain in
-      // history. compliance_flag is also updated here so the geofence badge reflects
-      // this clock-out's own location check (the "latest today selfie") rather than
-      // staying frozen at the clock-in's result.
-      const publicEndSelfieUrl = await resolveSelfieUrl(body, `${emp.id}_end`);
-
-      const { data: updatedShift, error: updateErr } = await supabase
+      // Find the open shift FIRST (not update-in-one-shot) so total_worked_minutes and
+      // early_departure_minutes can be computed for real from its own clock_in_time and
+      // scheduled_end snapshot, instead of a fabricated constant.
+      const { data: openShift, error: findErr } = await supabase
         .from("attendance_shifts")
-        .update({
-          status: "COMPLETED",
-          clock_out_event_id: clockOutId,
-          clock_out_time: nowIso,
-          total_worked_minutes: 480,
-          compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
-          end_selfie_url: publicEndSelfieUrl
-        })
+        .select("id, clock_in_time, shift_date, scheduled_end, scheduled_grace_out_minutes, selfie_url")
         .eq("employee_id", emp.id)
         .eq("status", "OPEN")
-        .select()
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      // Distinguish a real database error (500 -- something is actually broken) from
-      // the legitimate business case of no open shift existing (409 -- nothing to fix,
-      // the employee just hasn't clocked in). Previously both cases were indistinguishable
-      // (both just "no row came back"), which is exactly how a silently-failed clock-in
-      // upstream would surface downstream as a confusing "No open shift to close" here.
-      if (updateErr) {
-        console.error("[attendance] clock-out update failed:", JSON.stringify(updateErr));
+      if (findErr) {
+        console.error("[attendance] clock-out lookup failed:", JSON.stringify(findErr));
         return new Response(
-          JSON.stringify({ error: `Could not save clock-out: ${updateErr.message}` }),
+          JSON.stringify({ error: `Could not save clock-out: ${findErr.message}` }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (!updatedShift) {
+      if (!openShift) {
         return new Response(
           JSON.stringify({ error: "No open shift to close." }),
           { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      const shiftDto = formatShiftDto(updatedShift, updatedShift.selfie_url ?? null, geofence);
+      const clockOutId = crypto.randomUUID();
+      const publicEndSelfieUrl = await resolveSelfieUrl(body, `${emp.id}_end`);
+
+      const totalWorkedMinutes = openShift.clock_in_time
+        ? Math.max(0, Math.round((new Date(nowIso).getTime() - new Date(openShift.clock_in_time).getTime()) / 60000))
+        : null;
+
+      let earlyDepartureMinutes: number | null = null;
+      if (openShift.scheduled_end && openShift.shift_date) {
+        const schedEndUtc = scheduledEndUtc(openShift.shift_date, "00:00", openShift.scheduled_end, deviceLon ?? projectLon);
+        const rawEarly = Math.round((schedEndUtc.getTime() - new Date(nowIso).getTime()) / 60000);
+        earlyDepartureMinutes = Math.max(0, rawEarly - (openShift.scheduled_grace_out_minutes ?? 0));
+      }
+
+      // approval_status is set to PENDING only now, on a completed shift -- not at
+      // clock-in -- so the supervisor's approval queue shows finished shifts ready for
+      // review, not shifts still in progress.
+      const { data: updatedShift, error: updateErr } = await supabase
+        .from("attendance_shifts")
+        .update({
+          status: "COMPLETED",
+          clock_out_event_id: clockOutId,
+          clock_out_time: nowIso,
+          total_worked_minutes: totalWorkedMinutes,
+          compliance_flag: geofence.status === "INSIDE" ? "VERIFIED" : "NEEDS_REVIEW",
+          geofence_status: geofence.status,
+          distance_from_project_meters: geofence.distance,
+          early_departure_minutes: earlyDepartureMinutes,
+          end_selfie_url: publicEndSelfieUrl,
+          approval_status: "PENDING",
+        })
+        .eq("id", openShift.id)
+        .select()
+        .maybeSingle();
+
+      if (updateErr || !updatedShift) {
+        console.error("[attendance] clock-out update failed:", JSON.stringify(updateErr));
+        return new Response(
+          JSON.stringify({ error: `Could not save clock-out: ${updateErr?.message ?? "unknown database error"}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const shiftDto = formatShiftDto(updatedShift, updatedShift.selfie_url ?? openShift.selfie_url ?? null, geofence);
 
       return new Response(
         JSON.stringify({
@@ -452,40 +573,7 @@ serve(async (req: Request) => {
         .limit(30);
 
       const rawShifts = Array.isArray(recentShifts) ? recentShifts : [];
-      const shiftIds = rawShifts.map((s: any) => s.id);
-
-      // Fetch approvals data from attendance_approvals table
-      const approvalsMap: Record<string, any> = {};
-      if (shiftIds.length > 0) {
-        try {
-          const { data: approvals } = await supabase
-            .from("attendance_approvals")
-            .select("*")
-            .in("shift_id", shiftIds)
-            .order("reviewed_at", { ascending: false });
-
-          if (Array.isArray(approvals)) {
-            for (const a of approvals) {
-              if (!approvalsMap[a.shift_id]) {
-                approvalsMap[a.shift_id] = a;
-              }
-            }
-          }
-        } catch (_e) {}
-      }
-
-      const shiftsList = rawShifts.map((s: any) => {
-        const dto = formatShiftDto(s, s.selfie_url);
-        const appr = approvalsMap[s.id];
-        if (appr) {
-          dto.status = appr.decision; // "APPROVED", "REJECTED", "PENDING"
-          if (appr.comment) dto.review_comment = appr.comment;
-          if (appr.reviewed_at) dto.reviewed_at = appr.reviewed_at;
-        } else if (dto.status !== "OPEN" && !dto.reviewed_at) {
-          dto.status = "PENDING";
-        }
-        return dto;
-      });
+      const shiftsList = rawShifts.map((s: any) => formatShiftDto(s, s.selfie_url));
 
       return new Response(
         JSON.stringify({ shifts: shiftsList, error: null }),
@@ -493,32 +581,10 @@ serve(async (req: Request) => {
       );
     }
 
-    // Handle "my_attendance_approvals"
-    if (action === "my_attendance_approvals") {
-      try {
-        const { data: approvals, error: apprErr } = await supabase
-          .from("attendance_approvals")
-          .select("*")
-          .eq("employee_id", emp.id)
-          .order("created_at", { ascending: false });
-
-        return new Response(
-          JSON.stringify({ approvals: approvals || [], error: apprErr?.message ?? null }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      } catch (err: any) {
-        return new Response(
-          JSON.stringify({ approvals: [], error: err?.message ?? "Error fetching attendance approvals" }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-    }
-
     // Handle "my_notifications"
     if (action === "my_notifications") {
       const notifsList: any[] = [];
 
-      // 1. Fetch from notifications table if available
       try {
         const { data: dbNotifs } = await supabase
           .from("notifications")
@@ -542,11 +608,10 @@ serve(async (req: Request) => {
         // Ignore table errors
       }
 
-      // 2. Fetch reviewed attendance shifts to ensure worker always sees their approvals / rejections
       try {
         const { data: reviewedShifts } = await supabase
           .from("attendance_shifts")
-          .select("id, shift_date, status, review_comment, reviewed_by, reviewed_at")
+          .select("id, shift_date, approval_status, review_comment, reviewed_by, reviewed_at")
           .eq("employee_id", emp.id)
           .not("reviewed_at", "is", null)
           .order("reviewed_at", { ascending: false })
@@ -554,7 +619,7 @@ serve(async (req: Request) => {
 
         if (Array.isArray(reviewedShifts)) {
           for (const s of reviewedShifts) {
-            const isApproved = s.status === "APPROVED";
+            const isApproved = s.approval_status === "APPROVED";
             const shiftNotifId = `notif-shift-${s.id}`;
             if (!notifsList.some((n: any) => n.id === shiftNotifId)) {
               notifsList.push({
@@ -562,8 +627,8 @@ serve(async (req: Request) => {
                 type: "ATTENDANCE",
                 title: isApproved ? "✅ Shift Attendance Approved" : "❌ Shift Attendance Rejected",
                 message: isApproved
-                  ? `Your attendance on ${s.shift_date} was approved${s.reviewed_by ? ` by ${s.reviewed_by}` : ""}.${s.review_comment ? ` Note: ${s.review_comment}` : ""}`
-                  : `Your attendance on ${s.shift_date} was rejected${s.reviewed_by ? ` by ${s.reviewed_by}` : ""}. Reason: ${s.review_comment || "Not specified"}`,
+                  ? `Your attendance on ${s.shift_date} was approved.${s.review_comment ? ` Note: ${s.review_comment}` : ""}`
+                  : `Your attendance on ${s.shift_date} was rejected. Reason: ${s.review_comment || "Not specified"}`,
                 timestamp: s.reviewed_at || new Date().toISOString()
               });
             }
@@ -585,10 +650,10 @@ serve(async (req: Request) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    // Was status 200 -- an unhandled exception here (malformed body, a thrown error
-    // anywhere above) looked identical to a real success at the HTTP layer. Logged
-    // server-side (not just returned to the client) so a future failure is diagnosable
-    // from function logs without needing to guess.
+    // An unhandled exception here (malformed body, a thrown error anywhere above) must
+    // never look identical to a real success at the HTTP layer. Logged server-side (not
+    // just returned to the client) so a future failure is diagnosable from function logs
+    // without needing to guess.
     console.error("[attendance] unhandled error:", err?.message, err?.stack);
     return new Response(
       JSON.stringify({ error: err.message ?? "Error" }),
