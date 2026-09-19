@@ -550,6 +550,20 @@ class BackendWorkforceRepository(
         }
     }
 
+    override suspend fun teamRoster(): BackendResult<List<NoMobileWorkerDto>> {
+        val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
+        return try {
+            val response = api.teamRoster(auth, SupervisorActionRequest(action = "team_roster"))
+            val body = response.body()
+            if (!response.isSuccessful || body?.workers == null) {
+                val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody()) ?: "Failed to load team."
+                BackendResult.Failure(serverErr)
+            } else BackendResult.Success(body.workers)
+        } catch (e: IOException) {
+            BackendResult.Failure("Network error: ${e.message ?: "unable to reach the server."}", isNetworkError = true)
+        }
+    }
+
     override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {

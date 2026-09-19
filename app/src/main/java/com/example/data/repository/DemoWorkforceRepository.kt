@@ -546,6 +546,9 @@ class DemoWorkforceRepository(
     override suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>> =
         BackendResult.Success(emptyList())
 
+    override suspend fun teamRoster(): BackendResult<List<NoMobileWorkerDto>> =
+        BackendResult.Success(emptyList())
+
     override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> =
         BackendResult.Failure("Proxy attendance is not available in Demo Mode.")
 

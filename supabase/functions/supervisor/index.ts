@@ -562,6 +562,37 @@ serve(async (req: Request) => {
       return json({ workers, error: null });
     }
 
+    // -------------------- team_roster --------------------
+    // ALL active employees in the supervisor's own project (excluding the supervisor
+    // themself), regardless of whether they've registered a mobile device -- the full
+    // picklist for "whose attendance is this?" after a supervisor captures a selfie on
+    // the Home tab. Unlike team_without_mobile, this is never filtered to unregistered
+    // employees only.
+    if (action === "team_roster") {
+      const ids = (await scopedEmployeeIds()).filter((id) => id !== supervisor.id);
+      if (ids.length === 0) return json({ workers: [], error: null });
+      const { data: emps } = await supabase
+        .from("employees")
+        .select("id, employee_name, employee_id, employee_type")
+        .in("id", ids);
+      const { data: openShifts } = await supabase
+        .from("attendance_shifts")
+        .select("id, employee_id, clock_in_time")
+        .in("employee_id", ids)
+        .eq("status", "OPEN");
+      const openByEmp: Record<string, any> = {};
+      for (const s of openShifts ?? []) openByEmp[s.employee_id] = s;
+      const workers = (emps ?? []).map((e: any) => ({
+        id: e.id,
+        employee_code: e.employee_id,
+        full_name: e.employee_name,
+        role: (e.employee_type ?? "STAFF").toUpperCase(),
+        open_shift_id: openByEmp[e.id]?.id ?? null,
+        clock_in_time: openByEmp[e.id]?.clock_in_time ?? null,
+      }));
+      return json({ workers, error: null });
+    }
+
     // -------------------- proxy_clock_in --------------------
     // Records a clock-in for a worker in the supervisor's own team who has no mobile
     // device of their own -- entered from the supervisor's phone on the worker's behalf.

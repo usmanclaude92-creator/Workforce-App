@@ -105,6 +105,9 @@ interface SupabaseApi {
     suspend fun teamWithoutMobile(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<TeamWithoutMobileResponse>
 
     @POST("supervisor")
+    suspend fun teamRoster(@Header("Authorization") bearerToken: String, @Body request: SupervisorActionRequest): Response<TeamWithoutMobileResponse>
+
+    @POST("supervisor")
     suspend fun proxyClockIn(@Header("Authorization") bearerToken: String, @Body request: ProxyAttendanceRequest): Response<ProxyAttendanceResponse>
 
     @POST("supervisor")

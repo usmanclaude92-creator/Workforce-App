@@ -67,6 +67,9 @@ fun RealSupervisorDashboardScreen(
     var assignShiftWorker by remember { mutableStateOf<AttendanceShiftDto?>(null) }
     var showExportPdfDialog by remember { mutableStateOf(false) }
     var showProfileCameraDialog by remember { mutableStateOf(false) }
+    // Home-tab attendance: holds the just-captured selfie file path while the "whose
+    // attendance is this?" picker is shown, before the actual punch is submitted.
+    var pendingAttendanceSelfiePath by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val supervisorPrefs = remember(supervisorCode) {
@@ -226,9 +229,7 @@ fun RealSupervisorDashboardScreen(
                         SupTab.HOME -> HomeTab(
                             uiState = uiState,
                             onOpenPendingApprovals = { showPendingApprovalsScreen = true },
-                            onRequestClockIn = { viewModel.setStartShiftDialog(true) },
-                            onRequestClockOut = { viewModel.setEndShiftDialog(true) },
-                            onRequestProxyCamera = { worker -> viewModel.setProxyCameraTarget(worker) }
+                            onRequestAttendanceCamera = { viewModel.setAttendanceCameraDialog(true) }
                         )
                         SupTab.ROSTER -> RosterTab(
                             uiState = uiState,
@@ -335,30 +336,41 @@ fun RealSupervisorDashboardScreen(
     }
 
     val supervisorProjectName = uiState.profile?.projectName ?: uiState.myShift?.project?.name ?: "Assigned Site"
+    val supervisorShiftOpen = uiState.myShift?.status == "OPEN"
 
-    if (uiState.showStartShiftDialog) {
+    // Home tab attendance: capture the selfie FIRST (default framing is the supervisor's
+    // own current shift state), THEN ask who it's for -- see AttendanceTargetPickerDialog
+    // below, which resolves the actual clock-in/out action once a target is chosen.
+    if (uiState.showAttendanceCameraDialog) {
         CameraXSelfieDialog(
-            eventType = ShiftEventType.START_SHIFT, projectName = supervisorProjectName, employeeName = supervisorName,
-            onDismiss = { viewModel.setStartShiftDialog(false) },
-            onCaptureComplete = { path -> viewModel.clockInSelf(path) }
-        )
-    }
-    if (uiState.showEndShiftDialog) {
-        CameraXSelfieDialog(
-            eventType = ShiftEventType.END_SHIFT, projectName = supervisorProjectName, employeeName = supervisorName,
-            onDismiss = { viewModel.setEndShiftDialog(false) },
-            onCaptureComplete = { path -> viewModel.clockOutSelf(path) }
-        )
-    }
-    uiState.proxyCameraTarget?.let { target ->
-        CameraXSelfieDialog(
-            eventType = if (target.openShiftId != null) ShiftEventType.END_SHIFT else ShiftEventType.START_SHIFT,
+            eventType = if (supervisorShiftOpen) ShiftEventType.END_SHIFT else ShiftEventType.START_SHIFT,
             projectName = supervisorProjectName,
-            employeeName = target.fullName,
-            onDismiss = { viewModel.setProxyCameraTarget(null) },
+            employeeName = supervisorName,
+            onDismiss = { viewModel.setAttendanceCameraDialog(false) },
             onCaptureComplete = { path ->
-                if (target.openShiftId != null) viewModel.proxyClockOut(target.id, path)
-                else viewModel.proxyClockIn(target.id, path)
+                viewModel.setAttendanceCameraDialog(false)
+                pendingAttendanceSelfiePath = path
+            }
+        )
+    }
+    pendingAttendanceSelfiePath?.let { path ->
+        AttendanceTargetPickerDialog(
+            supervisorName = supervisorName,
+            supervisorShiftOpen = supervisorShiftOpen,
+            teamRoster = uiState.teamRoster,
+            onDismiss = {
+                runCatching { java.io.File(path).delete() }
+                pendingAttendanceSelfiePath = null
+            },
+            onConfirm = { targetId ->
+                pendingAttendanceSelfiePath = null
+                if (targetId == null) {
+                    if (supervisorShiftOpen) viewModel.clockOutSelf(path) else viewModel.clockInSelf(path)
+                } else {
+                    val member = uiState.teamRoster.find { it.id == targetId }
+                    if (member?.openShiftId != null) viewModel.proxyClockOut(targetId, path)
+                    else viewModel.proxyClockIn(targetId, path)
+                }
             }
         )
     }
@@ -683,16 +695,13 @@ private fun ApproveCommentPrompt(onDismiss: () -> Unit, onConfirm: (String) -> U
 private fun HomeTab(
     uiState: RealSupervisorUiState,
     onOpenPendingApprovals: (() -> Unit)? = null,
-    onRequestClockIn: () -> Unit = {},
-    onRequestClockOut: () -> Unit = {},
-    onRequestProxyCamera: (NoMobileWorkerDto) -> Unit = {}
+    onRequestAttendanceCamera: () -> Unit = {}
 ) {
     val isDark = LocalIsDarkTheme.current
     val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
     val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
-    val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
 
     val myShiftOpen = uiState.myShift?.status == "OPEN"
 
@@ -766,8 +775,10 @@ private fun HomeTab(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // My Attendance card -- supervisor's own clock-in/out, with selfie capture
-        // (CameraXSelfieDialog, wired at the screen level). Auto-approved server-side.
+        // Unified attendance card -- one selfie capture button, exactly like the Worker
+        // dashboard's Home hero button. Who the punch is actually recorded for (the
+        // supervisor themself, by default, or any employee on the same project) is
+        // chosen AFTER the photo is taken -- see AttendanceTargetPickerDialog.
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -776,18 +787,22 @@ private fun HomeTab(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Person, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("My Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
+                    Text("Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = if (myShiftOpen) "Clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}" else "Not currently clocked in.",
+                    text = if (myShiftOpen) "You're clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}." else "Not currently clocked in.",
                     fontSize = 12.sp, color = textSecondary
+                )
+                Text(
+                    "Take a selfie to record your own attendance, or on behalf of any team member on your project.",
+                    fontSize = 11.sp, color = textSecondary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
-                    onClick = { if (myShiftOpen) onRequestClockOut() else onRequestClockIn() },
+                    onClick = onRequestAttendanceCamera,
                     enabled = !uiState.isProcessing,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -798,68 +813,122 @@ private fun HomeTab(
                 ) {
                     Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (myShiftOpen) "Clock Out with Selfie" else "Clock In with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // Workers Without Mobile section -- proxy attendance, also selfie-verified.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Groups, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Workers Without a Mobile Device (${uiState.noMobileWorkers.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
-        }
-        Text(
-            "Team members who have never registered a device -- record their attendance here on their behalf.",
-            fontSize = 11.sp, color = textSecondary
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (uiState.noMobileWorkers.isEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                Text("Every team member has a registered mobile device.", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
-            }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                uiState.noMobileWorkers.forEach { worker ->
-                    val isOpen = worker.openShiftId != null
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = cardBg),
-                        border = BorderStroke(1.dp, cardBorder)
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(worker.fullName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
-                                Text("${worker.employeeCode} · ${worker.role}", fontSize = 11.sp, color = textMuted)
-                                Text(
-                                    text = if (isOpen) "On shift since ${formatShiftTime(worker.clockInTime) ?: "—"}" else "Not clocked in today",
-                                    fontSize = 11.sp,
-                                    color = if (isOpen) SophisticatedSuccess else textSecondary
-                                )
-                            }
-                            Button(
-                                onClick = { onRequestProxyCamera(worker) },
-                                enabled = !uiState.isProcessing,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isOpen) SophisticatedError else SophisticatedPrimary,
-                                    contentColor = Color.White
-                                ),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Text(if (isOpen) "Clock Out" else "Clock In", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+                    Text(if (myShiftOpen) "End Shift with Selfie" else "Start Shift with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun AttendanceTargetPickerDialog(
+    supervisorName: String,
+    supervisorShiftOpen: Boolean,
+    teamRoster: List<NoMobileWorkerDto>,
+    onDismiss: () -> Unit,
+    onConfirm: (targetEmployeeId: String?) -> Unit // null = the supervisor themself
+) {
+    var selectedId by remember { mutableStateOf<String?>(null) } // null = Myself
+    val isDark = LocalIsDarkTheme.current
+    val surfaceColor = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val borderColor = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+    val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = surfaceColor,
+            border = BorderStroke(1.dp, borderColor),
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.75f)
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                Text("Whose Attendance Is This?", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textPrimary)
+                Text(
+                    "Confirm who the selfie you just captured records attendance for.",
+                    fontSize = 12.sp, color = textSecondary
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AttendanceTargetRow(
+                        title = "Myself ($supervisorName)",
+                        subtitle = if (supervisorShiftOpen) "Will clock out" else "Will clock in",
+                        selected = selectedId == null,
+                        onClick = { selectedId = null }
+                    )
+                    teamRoster.forEach { member ->
+                        val isOpen = member.openShiftId != null
+                        AttendanceTargetRow(
+                            title = member.fullName,
+                            subtitle = "${member.employeeCode} · ${member.role} · ${if (isOpen) "Will clock out" else "Will clock in"}",
+                            selected = selectedId == member.id,
+                            onClick = { selectedId = member.id }
+                        )
+                    }
+                    if (teamRoster.isEmpty()) {
+                        Text(
+                            "No other employees found on your project.",
+                            fontSize = 12.sp, color = textSecondary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = { onConfirm(selectedId) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SophisticatedPrimary, contentColor = Color.White)
+                    ) {
+                        Text("Confirm", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttendanceTargetRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val isDark = LocalIsDarkTheme.current
+    val cardBg = if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+    val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) SophisticatedPrimary.copy(alpha = 0.15f) else cardBg,
+        border = BorderStroke(1.dp, if (selected) SophisticatedPrimary else Color.Transparent),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
+                Text(subtitle, fontSize = 11.sp, color = textSecondary)
+            }
+            RadioButton(selected = selected, onClick = onClick, colors = RadioButtonDefaults.colors(selectedColor = SophisticatedPrimary))
+        }
     }
 }
 

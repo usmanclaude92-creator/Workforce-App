@@ -109,6 +109,11 @@ interface IWorkforceRepository {
     // on the Home tab instead.
     suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>>
 
+    // ALL active employees in the supervisor's own project (excluding the supervisor),
+    // regardless of device registration -- the picklist for "whose attendance is this?"
+    // after a Home-tab selfie capture.
+    suspend fun teamRoster(): BackendResult<List<NoMobileWorkerDto>>
+
     suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String? = null): BackendResult<AttendanceShiftDto>
 
     suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String? = null): BackendResult<AttendanceShiftDto>
