@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,7 @@ import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealWorkerUiState
 import com.example.ui.viewmodel.RealWorkerViewModel
 import java.util.Calendar
+import kotlinx.coroutines.launch
 
 private enum class RealWorkerTab { SHIFT, LOGS, LEAVE, PROFILE }
 
@@ -73,6 +75,9 @@ fun RealWorkerDashboardScreen(
     employeeName: String,
     employeeCode: String,
     onLogout: () -> Unit,
+    // Re-registers this Civil ID with a new PIN (self-service PIN reset) -- returns null
+    // on success, or an error message to show in the dialog.
+    onChangePin: (suspend (civilId: String, newPin: String) -> String?)? = null,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -85,6 +90,7 @@ fun RealWorkerDashboardScreen(
         ?: uiState.shiftHistory.firstOrNull()?.project?.name ?: "Assigned Site"
     var showProfileCameraDialog by remember { mutableStateOf(false) }
     var showSelfieVerificationDialog by remember { mutableStateOf(false) }
+    var showChangePinDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -143,6 +149,7 @@ fun RealWorkerDashboardScreen(
                             fallbackName = employeeName,
                             fallbackCode = employeeCode,
                             onUpdatePhotoClick = { showProfileCameraDialog = true },
+                            onChangePinClick = { showChangePinDialog = true },
                             onLogout = onLogout
                         )
                     }
@@ -218,6 +225,12 @@ fun RealWorkerDashboardScreen(
         )
     }
     if (showNotifications) NotificationsDialog(uiState.notifications, onDismiss = { showNotifications = false })
+    if (showChangePinDialog && onChangePin != null) {
+        ChangePinDialog(
+            onDismiss = { showChangePinDialog = false },
+            onSubmit = onChangePin
+        )
+    }
 }
 
 @Composable
@@ -240,6 +253,129 @@ private fun NotificationsDialog(notifications: List<NotificationDto>, onDismiss:
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
+}
+
+/**
+ * Self-service PIN reset (re-registers the same Civil ID with a new PIN via
+ * civil-id-register, which upserts on civil_id). Reused by both the Worker
+ * and Supervisor Profile tabs.
+ */
+@Composable
+fun ChangePinDialog(
+    onDismiss: () -> Unit,
+    onSubmit: suspend (civilId: String, newPin: String) -> String?
+) {
+    var civilId by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var success by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = { if (!isLoading) onDismiss() },
+        title = { Text(if (success) "PIN Changed" else "Change PIN") },
+        text = {
+            if (success) {
+                Text(
+                    "Your PIN has been updated. Use your Civil ID and new PIN to sign in next time.",
+                    fontSize = 13.sp
+                )
+            } else {
+                Column {
+                    Text(
+                        "Enter your Civil ID and choose a new 4-digit PIN.",
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    errorMessage?.let { err ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        ) {
+                            Text(
+                                err,
+                                modifier = Modifier.padding(12.dp),
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = civilId,
+                        onValueChange = { civilId = it.filter { c -> c.isDigit() } },
+                        label = { Text("Civil ID Number") },
+                        leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null) },
+                        singleLine = true,
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = newPin,
+                        onValueChange = { if (it.length <= 4) newPin = it.filter { c -> c.isDigit() } },
+                        label = { Text("New 4-digit PIN") },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                        singleLine = true,
+                        enabled = !isLoading,
+                        visualTransformation = PasswordVisualTransformation(),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = confirmPin,
+                        onValueChange = { if (it.length <= 4) confirmPin = it.filter { c -> c.isDigit() } },
+                        label = { Text("Confirm New PIN") },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                        singleLine = true,
+                        enabled = !isLoading,
+                        visualTransformation = PasswordVisualTransformation(),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (success) {
+                TextButton(onClick = onDismiss) { Text("Done") }
+            } else {
+                val pinsMatch = newPin.length == 4 && newPin == confirmPin
+                TextButton(
+                    enabled = !isLoading && civilId.isNotBlank() && pinsMatch,
+                    onClick = {
+                        errorMessage = null
+                        isLoading = true
+                        coroutineScope.launch {
+                            val error = onSubmit(civilId.trim(), newPin)
+                            isLoading = false
+                            if (error == null) {
+                                success = true
+                            } else {
+                                errorMessage = error
+                            }
+                        }
+                    }
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    } else {
+                        Text("Save")
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            if (!success) {
+                TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Cancel") }
+            }
+        }
     )
 }
 
@@ -1450,6 +1586,7 @@ private fun ProfileTab(
     fallbackName: String,
     fallbackCode: String,
     onUpdatePhotoClick: () -> Unit = {},
+    onChangePinClick: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val profile = uiState.profile
@@ -1859,6 +1996,23 @@ private fun ProfileTab(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+        OutlinedButton(
+            onClick = onChangePinClick,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.5f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = SophisticatedPrimary
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("change_pin_btn")
+        ) {
+            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Change PIN", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        Spacer(modifier = Modifier.height(10.dp))
         OutlinedButton(
             onClick = onLogout,
             shape = RoundedCornerShape(14.dp),

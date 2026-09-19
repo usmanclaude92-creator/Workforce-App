@@ -13,7 +13,12 @@ import kotlinx.coroutines.launch
 
 enum class RealAuthScreenState {
     CHECKING_CACHED_SESSION,
+    // Civil ID + PIN, shown on every app open and every sign-in -- never a PIN-only
+    // "welcome back" shortcut, and never resolved silently from a cached session.
     PIN_LOGIN,
+    // Civil ID + choose PIN + confirm PIN. Reached only when the server reports this
+    // Civil ID has no PIN registered yet, or isn't registered to this device -- never
+    // shown as the app's default landing screen.
     CIVIL_ID_REGISTER,
     SIGNED_IN
 }
@@ -23,7 +28,10 @@ data class RealAuthUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val notEligibleForRealAccount: Boolean = false,
-    val cachedEmployeeName: String? = null,
+    // Carries the Civil ID the user just typed on the login screen into the
+    // registration screen when the server says this Civil ID/device needs it, so they
+    // don't have to retype it.
+    val prefillCivilId: String? = null,
     val signedInEmployee: BackendEmployee? = null,
     val pinLockedForSeconds: Int? = null
 )
@@ -35,16 +43,22 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
     val uiState: StateFlow<RealAuthUiState> = _uiState.asStateFlow()
 
     init {
-        _uiState.value = if (repository.hasCachedSession()) {
-            RealAuthUiState(screen = RealAuthScreenState.PIN_LOGIN, cachedEmployeeName = repository.cachedEmployeeName())
-        } else {
-            RealAuthUiState(screen = RealAuthScreenState.CIVIL_ID_REGISTER)
-        }
+        // Always starts on the Civil ID + PIN login screen -- registration is only ever
+        // reached from here, when the server reports this Civil ID/device needs it.
+        _uiState.value = RealAuthUiState(screen = RealAuthScreenState.PIN_LOGIN)
     }
 
     fun switchToRegisterInstead() {
         _uiState.value = _uiState.value.copy(
             screen = RealAuthScreenState.CIVIL_ID_REGISTER,
+            errorMessage = null,
+            notEligibleForRealAccount = false
+        )
+    }
+
+    fun switchToLoginInstead() {
+        _uiState.value = _uiState.value.copy(
+            screen = RealAuthScreenState.PIN_LOGIN,
             errorMessage = null,
             notEligibleForRealAccount = false
         )
@@ -77,14 +91,18 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
         }
     }
 
-    fun loginWithPin(pin: String) {
+    fun loginWithPin(civilId: String, pin: String) {
+        if (civilId.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Enter your Civil ID.")
+            return
+        }
         if (!pin.matches(Regex("^[0-9]{4}$"))) {
             _uiState.value = _uiState.value.copy(errorMessage = "Enter your 4-digit PIN.")
             return
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            when (val outcome = repository.loginWithPin(pin)) {
+            when (val outcome = repository.loginWithPin(civilId.trim(), pin)) {
                 is PinLoginOutcome.Success -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     screen = RealAuthScreenState.SIGNED_IN,
@@ -92,7 +110,8 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
                 )
                 PinLoginOutcome.NeedsRegistration -> _uiState.value = RealAuthUiState(
                     screen = RealAuthScreenState.CIVIL_ID_REGISTER,
-                    errorMessage = "This device needs to verify your Civil ID again."
+                    prefillCivilId = civilId.trim(),
+                    errorMessage = "First time on this device — choose a PIN to finish setting up."
                 )
                 is PinLoginOutcome.Locked -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
@@ -102,8 +121,8 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
                 is PinLoginOutcome.IncorrectPin -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     errorMessage = if (outcome.attemptsRemaining != null) {
-                        "Incorrect PIN. ${outcome.attemptsRemaining} attempt(s) remaining."
-                    } else "Incorrect PIN."
+                        "Incorrect Civil ID or PIN. ${outcome.attemptsRemaining} attempt(s) remaining."
+                    } else "Incorrect Civil ID or PIN."
                 )
                 is PinLoginOutcome.Error -> _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = outcome.message)
             }
@@ -124,7 +143,7 @@ class RealAuthViewModel(private val repository: BackendAuthRepository) : ViewMod
             if (_uiState.value.signedInEmployee?.isDemo != true) {
                 repository.logout()
             }
-            _uiState.value = RealAuthUiState(screen = RealAuthScreenState.CIVIL_ID_REGISTER)
+            _uiState.value = RealAuthUiState(screen = RealAuthScreenState.PIN_LOGIN)
         }
     }
 

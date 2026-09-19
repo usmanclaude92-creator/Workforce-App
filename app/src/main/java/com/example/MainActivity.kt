@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.repository.BackendAuthRepository
 import com.example.data.repository.BackendWorkforceRepository
+import com.example.data.repository.CivilIdRegisterOutcome
 import com.example.data.repository.DemoWorkforceRepository
 import com.example.data.repository.IWorkforceRepository
 import com.example.data.repository.SupabaseStorageService
@@ -174,7 +175,14 @@ fun ArtifyAppRoot() {
                             viewModel = supervisorViewModel,
                             supervisorName = signedInEmployee.fullName,
                             supervisorCode = signedInEmployee.employeeCode,
-                            onLogout = { realAuthViewModel.logout() }
+                            onLogout = { realAuthViewModel.logout() },
+                            onChangePin = { civilId, newPin ->
+                                when (val outcome = realAuthRepository.registerWithCivilId(civilId, newPin)) {
+                                    is CivilIdRegisterOutcome.Success -> null
+                                    CivilIdRegisterOutcome.NotEligible -> "This Civil ID isn't on the workforce roster."
+                                    is CivilIdRegisterOutcome.Error -> outcome.message
+                                }
+                            }
                         )
                     } else {
                         val locationHelper = remember { LocationHelper(context) }
@@ -190,7 +198,14 @@ fun ArtifyAppRoot() {
                             viewModel = workerViewModel,
                             employeeName = signedInEmployee.fullName,
                             employeeCode = signedInEmployee.employeeCode,
-                            onLogout = { realAuthViewModel.logout() }
+                            onLogout = { realAuthViewModel.logout() },
+                            onChangePin = { civilId, newPin ->
+                                when (val outcome = realAuthRepository.registerWithCivilId(civilId, newPin)) {
+                                    is CivilIdRegisterOutcome.Success -> null
+                                    CivilIdRegisterOutcome.NotEligible -> "This Civil ID isn't on the workforce roster."
+                                    is CivilIdRegisterOutcome.Error -> outcome.message
+                                }
+                            }
                         )
                     }
                 }

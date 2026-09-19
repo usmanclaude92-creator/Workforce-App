@@ -55,6 +55,7 @@ fun RealSupervisorDashboardScreen(
     supervisorName: String,
     supervisorCode: String,
     onLogout: () -> Unit,
+    onChangePin: (suspend (civilId: String, newPin: String) -> String?)? = null,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -67,6 +68,7 @@ fun RealSupervisorDashboardScreen(
     var assignShiftWorker by remember { mutableStateOf<AttendanceShiftDto?>(null) }
     var showExportPdfDialog by remember { mutableStateOf(false) }
     var showProfileCameraDialog by remember { mutableStateOf(false) }
+    var showChangePinDialog by remember { mutableStateOf(false) }
     // Home-tab attendance: holds the just-captured selfie file path while the "whose
     // attendance is this?" picker is shown, before the actual punch is submitted.
     var pendingAttendanceSelfiePath by remember { mutableStateOf<String?>(null) }
@@ -255,6 +257,7 @@ fun RealSupervisorDashboardScreen(
                             fallbackName = supervisorName,
                             fallbackCode = supervisorCode,
                             onUpdatePhotoClick = { showProfileCameraDialog = true },
+                            onChangePinClick = { showChangePinDialog = true },
                             onLogout = onLogout
                         )
                     }
@@ -398,6 +401,13 @@ fun RealSupervisorDashboardScreen(
                 showProfileCameraDialog = false
                 viewModel.updateProfilePhoto(path)
             }
+        )
+    }
+
+    if (showChangePinDialog && onChangePin != null) {
+        ChangePinDialog(
+            onDismiss = { showChangePinDialog = false },
+            onSubmit = onChangePin
         )
     }
 
@@ -1838,6 +1848,7 @@ private fun ProfileTab(
     fallbackName: String,
     fallbackCode: String,
     onUpdatePhotoClick: () -> Unit = {},
+    onChangePinClick: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val profile = uiState.profile
@@ -2235,6 +2246,22 @@ private fun ProfileTab(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+        OutlinedButton(
+            onClick = onChangePinClick,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.5f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = SophisticatedPrimary
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Change PIN", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        Spacer(modifier = Modifier.height(10.dp))
         OutlinedButton(
             onClick = onLogout,
             shape = RoundedCornerShape(14.dp),

@@ -32,7 +32,7 @@ data class BackendEmployee(
 
 @JsonClass(generateAdapter = true)
 data class PinLoginRequest(
-    @Json(name = "employee_id") val employeeId: String,
+    @Json(name = "civil_id") val civilId: String,
     @Json(name = "device_id") val deviceId: String,
     val pin: String
 )

@@ -53,61 +53,33 @@ class BackendAuthRepository(private val sessionStore: SecureSessionStore) {
         }
     }
 
-    suspend fun loginWithPin(pin: String): PinLoginOutcome {
-        val employeeId = sessionStore.cachedEmployeeId()
-            ?: return PinLoginOutcome.NeedsRegistration
-
-        // 1. Check local device lockout first
+    // Always verifies Civil ID + PIN against the server -- no local/offline shortcut and
+    // no reliance on a cached identity, since the login screen asks for both every time,
+    // on every device, by design (never a PIN-only "welcome back" unlock).
+    suspend fun loginWithPin(civilId: String, pin: String): PinLoginOutcome {
         if (sessionStore.isLocked()) {
             return PinLoginOutcome.Locked(sessionStore.getLockoutRemainingSeconds())
         }
-
-        // 2. Hardware-backed secure PIN verification (guarantees PIN works across restarts/reboots)
-        if (sessionStore.hasRegisteredPin()) {
-            val isValid = sessionStore.verifyPin(pin)
-            if (!isValid) {
-                val attempts = sessionStore.recordFailedAttempt()
-                val maxAttempts = 5
-                return if (attempts >= maxAttempts) {
-                    sessionStore.lockForSeconds(300)
-                    PinLoginOutcome.Locked(300)
-                } else {
-                    PinLoginOutcome.IncorrectPin(maxAttempts - attempts)
-                }
-            }
-
-            // PIN verified successfully! Reset failed counter
-            sessionStore.resetFailedAttempts()
-
-            val cachedEmployee = sessionStore.cachedEmployee()
-                ?: return PinLoginOutcome.NeedsRegistration
-
-            // Asynchronously ensure access token is fresh if online
-            try {
-                refreshAccessTokenIfNeeded()
-            } catch (ignored: Exception) {
-                // Offline login is fully supported with verified local PIN
-            }
-
-            return PinLoginOutcome.Success(cachedEmployee)
-        }
-
-        // 3. Fallback to remote API for initial verification if local PIN not yet stored
         return try {
-            val response = api.pinLogin(PinLoginRequest(employeeId = employeeId, deviceId = deviceId, pin = pin))
+            val response = api.pinLogin(PinLoginRequest(civilId = civilId, deviceId = deviceId, pin = pin))
             val body = response.body()
             when {
                 body?.needsRegistration == true -> {
                     sessionStore.clearSession()
                     PinLoginOutcome.NeedsRegistration
                 }
-                response.code() == 423 -> PinLoginOutcome.Locked(body?.lockedForSeconds ?: 900)
+                response.code() == 423 -> {
+                    val seconds = body?.lockedForSeconds ?: 900
+                    sessionStore.lockForSeconds(seconds)
+                    PinLoginOutcome.Locked(seconds)
+                }
                 !response.isSuccessful || body?.accessToken == null || body.employee == null ->
                     PinLoginOutcome.IncorrectPin(body?.attemptsRemaining)
                 else -> {
-                    val refreshToken = sessionStore.cachedRefreshToken() ?: return PinLoginOutcome.NeedsRegistration
-                    persistSession(body.employee, body.accessToken, refreshToken)
-                    sessionStore.savePin(pin) // Save for future offline/reboot verification
+                    // The backend issues one opaque session token used as both access and
+                    // refresh token (see decodeExpiry below) -- civil-id-register's own
+                    // response echoes the identical string for both fields.
+                    persistSession(body.employee, body.accessToken, body.accessToken)
                     PinLoginOutcome.Success(body.employee)
                 }
             }
