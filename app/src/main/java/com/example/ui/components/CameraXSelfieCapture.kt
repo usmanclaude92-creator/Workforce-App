@@ -286,36 +286,7 @@ fun CameraXSelfieCaptureView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Event Badge (Clock In / Clock Out)
-                val isStart = eventType == ShiftEventType.START_SHIFT
-                val badgeColor = if (isStart) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = badgeColor.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(badgeColor)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isStart) "IDENTITY VERIFICATION • CLOCK IN" else "IDENTITY VERIFICATION • CLOCK OUT",
-                            color = badgeColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-                }
-
-                // Top Right Controls (Fill Light, Grid, Close)
+                // Top Left Controls (Fill Light, Grid)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -353,23 +324,23 @@ fun CameraXSelfieCaptureView(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                }
 
-                    // Close Dialog Button
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .testTag("close_camera_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close Camera",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                // Close Dialog Button
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .testTag("close_camera_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close Camera",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
             }
@@ -562,7 +533,7 @@ fun CameraXSelfieCaptureView(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "$projectName • Telemetry Ready",
+                                text = "$projectName : ${if (eventType == ShiftEventType.START_SHIFT) "SHIFT START" else "SHIFT END"}",
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold
