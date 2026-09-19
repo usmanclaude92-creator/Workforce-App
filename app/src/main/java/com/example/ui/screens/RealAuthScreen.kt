@@ -31,6 +31,7 @@ import com.example.R
 import androidx.compose.ui.unit.sp
 import com.example.model.UserRole
 import com.example.network.BackendEmployee
+import com.example.ui.theme.LocalIsDarkTheme
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.RealAuthScreenState
 import com.example.ui.viewmodel.RealAuthViewModel
@@ -105,11 +106,13 @@ private fun CivilIdRegisterContent(
     ) {
         Spacer(modifier = Modifier.height(28.dp))
         Image(
-            painter = painterResource(id = R.drawable.artify_logo_mark),
-            contentDescription = "Artify",
-            modifier = Modifier.size(84.dp)
+            painter = painterResource(
+                id = if (LocalIsDarkTheme.current) R.drawable.artify_full_logo_dark else R.drawable.artify_full_logo_light
+            ),
+            contentDescription = "Artify Human Capital Management System",
+            modifier = Modifier.height(64.dp)
         )
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(18.dp))
         Text("VERIFY YOUR CIVIL ID", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(
             "One-time verification against your employer's workforce roster. After this, you'll only need your 4-digit PIN on this device.",
@@ -362,11 +365,13 @@ private fun PinLoginContent(
     ) {
         Spacer(modifier = Modifier.height(28.dp))
         Image(
-            painter = painterResource(id = R.drawable.artify_logo_mark),
-            contentDescription = "Artify",
-            modifier = Modifier.size(84.dp)
+            painter = painterResource(
+                id = if (LocalIsDarkTheme.current) R.drawable.artify_full_logo_dark else R.drawable.artify_full_logo_light
+            ),
+            contentDescription = "Artify Human Capital Management System",
+            modifier = Modifier.height(64.dp)
         )
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(18.dp))
         Text("SIGN IN", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
 
         Spacer(modifier = Modifier.height(24.dp))
