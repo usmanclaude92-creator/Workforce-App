@@ -376,7 +376,7 @@ class RealSupervisorViewModel(
                 val actionLabel = if (isScheduleChange) "Schedule update" else "Shift assignment"
                 _uiState.value = _uiState.value.copy(
                     isProcessing = false,
-                    statusMessage = "✓ $actionLabel push alert dispatched to $employeeName via Firebase Cloud Messaging."
+                    statusMessage = "✓ $actionLabel successfully sent to $employeeName."
                 )
                 refresh()
             } catch (e: Exception) {

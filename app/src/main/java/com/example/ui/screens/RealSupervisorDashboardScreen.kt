@@ -2397,12 +2397,6 @@ fun AssignShiftScheduleScreen(
                                 fontSize = 16.sp,
                                 color = textPrimary
                             )
-                            Text(
-                                text = "Firebase Cloud Messaging Dispatch",
-                                fontSize = 11.sp,
-                                color = SophisticatedPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
                         }
                     }
                     IconButton(onClick = onDismiss) {
@@ -2753,42 +2747,6 @@ fun AssignShiftScheduleScreen(
                         unfocusedBorderColor = borderColor
                     )
                 )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // FCM Cloud Notification Banner Indicator
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = SophisticatedPrimaryContainer.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.CloudSync,
-                            contentDescription = null,
-                            tint = SophisticatedPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Firebase Cloud Messaging Dispatch",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = SophisticatedPrimary
-                            )
-                            Text(
-                                text = "Topic: employee_${selectedEmployeeCode} & shifts_schedules • High Priority",
-                                fontSize = 10.sp,
-                                color = textSecondary
-                            )
-                        }
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
