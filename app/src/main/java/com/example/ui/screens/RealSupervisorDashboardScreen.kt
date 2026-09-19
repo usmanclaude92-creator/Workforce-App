@@ -793,41 +793,20 @@ private fun HomeTab(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Unified attendance card -- one selfie capture button, exactly like the Worker
-        // dashboard's Home hero button. It always starts a NEW punch (for the supervisor
+        // Single selfie-capture button -- always starts a NEW punch (for the supervisor
         // by default, or any project employee not already clocked in -- chosen AFTER the
         // photo is taken, see AttendanceTargetPickerDialog); ending an ongoing shift is
         // done per-person from the Ongoing Shifts list below instead.
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = cardBg),
-            border = BorderStroke(1.dp, cardBorder)
+        Button(
+            onClick = onRequestAttendanceCamera,
+            enabled = !uiState.isProcessing,
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = SophisticatedPrimary, contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    "Take a selfie to record your own attendance, or on behalf of any team member on your project.",
-                    fontSize = 11.sp, color = textSecondary
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = onRequestAttendanceCamera,
-                    enabled = !uiState.isProcessing,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SophisticatedPrimary, contentColor = Color.White),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Start Shift with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            }
+            Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Text("Start Shift with Selfie", fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
 
         Spacer(modifier = Modifier.height(18.dp))
