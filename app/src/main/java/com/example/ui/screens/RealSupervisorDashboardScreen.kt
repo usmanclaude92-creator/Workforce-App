@@ -1384,11 +1384,6 @@ private fun LeaveApprovalTab(
             fontSize = 18.sp,
             color = textPrimary
         )
-        Text(
-            text = "Approve or reject workforce absence requests with formal audit logs",
-            fontSize = 12.sp,
-            color = textSecondary
-        )
         Spacer(modifier = Modifier.height(14.dp))
 
         if (uiState.pendingLeave.isEmpty()) {
@@ -1533,11 +1528,6 @@ private fun SitesTab(sites: List<SiteDto>) {
             fontSize = 18.sp,
             color = textPrimary
         )
-        Text(
-            text = "Active project locations and live site rosters",
-            fontSize = 12.sp,
-            color = textSecondary
-        )
         Spacer(modifier = Modifier.height(14.dp))
 
         if (sites.isEmpty()) {
@@ -1563,7 +1553,8 @@ private fun SitesTab(sites: List<SiteDto>) {
                                     text = site.name,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
-                                    color = textPrimary
+                                    color = textPrimary,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                                 )
                                 Surface(
                                     shape = RoundedCornerShape(50),
