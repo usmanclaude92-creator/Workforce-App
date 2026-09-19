@@ -2066,14 +2066,6 @@ private fun ProfileTab(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "High-contrast dynamic themes designed for bright daylight and night construction visibility.",
-                    color = textSecondary,
-                    fontSize = 12.sp
-                )
-
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // 3-Way Mode Segmented Selector (System, Light, Dark)
