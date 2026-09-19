@@ -219,8 +219,7 @@ private fun DemoModeEntryCard(onClick: () -> Unit) {
             ) { Icon(Icons.Default.PlayCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp)) }
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Not on the roster yet? Try the Demo", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                Text("Explore every screen with a sample account", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Click to Explore Demo Accounts", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
             }
             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
