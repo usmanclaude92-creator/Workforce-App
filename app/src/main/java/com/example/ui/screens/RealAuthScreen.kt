@@ -363,18 +363,18 @@ private fun PinLoginContent(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(72.dp))
         Image(
             painter = painterResource(
                 id = if (LocalIsDarkTheme.current) R.drawable.artify_full_logo_dark else R.drawable.artify_full_logo_light
             ),
             contentDescription = "Artify Human Capital Management System",
-            modifier = Modifier.height(64.dp)
+            modifier = Modifier.height(76.dp)
         )
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(48.dp))
         Text("SIGN IN", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         errorMessage?.let { err ->
             Surface(
@@ -407,7 +407,7 @@ private fun PinLoginContent(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Button(
             onClick = { onSubmit(civilId, pin) },
@@ -421,7 +421,7 @@ private fun PinLoginContent(
 
         Spacer(modifier = Modifier.height(22.dp))
         HorizontalDivider()
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         DemoModeEntryCard(onClick = { showDemoPicker = true })
         Spacer(modifier = Modifier.height(30.dp))
