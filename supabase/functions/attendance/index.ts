@@ -134,7 +134,7 @@ serve(async (req: Request) => {
     // 2. Fetch full employee details from HCMS master database
     const { data: emp } = await supabase
       .from("employees")
-      .select("id, employee_name, employee_id, civil_id, employee_company, designation, employee_type, assigned_project_id, is_active")
+      .select("id, employee_name, employee_id, civil_id, employee_company, designation, employee_type, assigned_project_id, is_active, is_workforce_supervisor")
       .eq("id", empId)
       .maybeSingle();
 
@@ -522,7 +522,11 @@ serve(async (req: Request) => {
 
       // approval_status is set to PENDING only now, on a completed shift -- not at
       // clock-in -- so the supervisor's approval queue shows finished shifts ready for
-      // review, not shifts still in progress.
+      // review, not shifts still in progress. A supervisor punching their OWN attendance
+      // has no separate reviewer (they'd just be approving themselves), so their own
+      // shift auto-approves immediately instead, matching how `supervisor.ts`'s
+      // proxy_clock_out already auto-approves attendance recorded on a worker's behalf.
+      const isSelfSupervisor = Boolean(emp.is_workforce_supervisor);
       const { data: updatedShift, error: updateErr } = await supabase
         .from("attendance_shifts")
         .update({
@@ -535,7 +539,12 @@ serve(async (req: Request) => {
           distance_from_project_meters: geofence.distance,
           early_departure_minutes: earlyDepartureMinutes,
           end_selfie_url: publicEndSelfieUrl,
-          approval_status: "PENDING",
+          approval_status: isSelfSupervisor ? "APPROVED" : "PENDING",
+          ...(isSelfSupervisor ? {
+            reviewed_by: emp.id,
+            reviewed_at: nowIso,
+            review_comment: "Self-recorded by supervisor; no separate review required.",
+          } : {}),
         })
         .eq("id", openShift.id)
         .select()

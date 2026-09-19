@@ -546,10 +546,10 @@ class DemoWorkforceRepository(
     override suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>> =
         BackendResult.Success(emptyList())
 
-    override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> =
+    override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> =
         BackendResult.Failure("Proxy attendance is not available in Demo Mode.")
 
-    override suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> =
+    override suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> =
         BackendResult.Failure("Proxy attendance is not available in Demo Mode.")
 
     private fun AttendanceEntity.toShiftDto(

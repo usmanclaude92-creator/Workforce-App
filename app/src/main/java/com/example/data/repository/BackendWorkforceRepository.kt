@@ -550,10 +550,10 @@ class BackendWorkforceRepository(
         }
     }
 
-    override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> {
+    override suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
-            val response = api.proxyClockIn(auth, ProxyAttendanceRequest(action = "proxy_clock_in", employeeId = employeeId, latitude = latitude, longitude = longitude))
+            val response = api.proxyClockIn(auth, ProxyAttendanceRequest(action = "proxy_clock_in", employeeId = employeeId, latitude = latitude, longitude = longitude, selfieBase64 = selfieBase64))
             val body = response.body()
             if (!response.isSuccessful || body?.shift == null) {
                 val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody())
@@ -564,10 +564,10 @@ class BackendWorkforceRepository(
         }
     }
 
-    override suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto> {
+    override suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String?): BackendResult<AttendanceShiftDto> {
         val auth = bearer() ?: return BackendResult.Failure("Session expired. Please verify your Civil ID again.")
         return try {
-            val response = api.proxyClockOut(auth, ProxyAttendanceRequest(action = "proxy_clock_out", employeeId = employeeId, latitude = latitude, longitude = longitude))
+            val response = api.proxyClockOut(auth, ProxyAttendanceRequest(action = "proxy_clock_out", employeeId = employeeId, latitude = latitude, longitude = longitude, selfieBase64 = selfieBase64))
             val body = response.body()
             if (!response.isSuccessful || body?.shift == null) {
                 val serverErr = body?.error ?: extractServerErrorMessage(response.errorBody())

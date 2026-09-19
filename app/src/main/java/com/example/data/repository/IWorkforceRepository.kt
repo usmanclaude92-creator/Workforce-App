@@ -106,10 +106,10 @@ interface IWorkforceRepository {
 
     // Team members in the supervisor's scope who have no mobile device of their own
     // (never completed device registration) -- the supervisor records their attendance
-    // on the Shift tab instead.
+    // on the Home tab instead.
     suspend fun teamWithoutMobile(): BackendResult<List<NoMobileWorkerDto>>
 
-    suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto>
+    suspend fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String? = null): BackendResult<AttendanceShiftDto>
 
-    suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?): BackendResult<AttendanceShiftDto>
+    suspend fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?, selfieBase64: String? = null): BackendResult<AttendanceShiftDto>
 }

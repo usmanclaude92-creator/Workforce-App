@@ -166,7 +166,10 @@ fun ArtifyAppRoot() {
                 }
                 Box(modifier = Modifier.weight(1f)) {
                     if (signedInEmployee.role == "SUPERVISOR" || signedInEmployee.role == "ADMIN") {
-                        val supervisorViewModel = remember(signedInEmployee.id) { RealSupervisorViewModel(workforceRepository) }
+                        val supervisorLocationHelper = remember { LocationHelper(context) }
+                        val supervisorViewModel = remember(signedInEmployee.id) {
+                            RealSupervisorViewModel(workforceRepository, supervisorLocationHelper)
+                        }
                         RealSupervisorDashboardScreen(
                             viewModel = supervisorViewModel,
                             supervisorName = signedInEmployee.fullName,

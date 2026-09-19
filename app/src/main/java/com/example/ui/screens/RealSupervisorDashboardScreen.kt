@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -30,20 +31,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import com.example.location.LocationHelper
+import com.example.model.ShiftEventType
 import com.example.network.AttendanceShiftDto
 import com.example.network.LeaveRequestDto
 import com.example.network.NoMobileWorkerDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
+import com.example.security.SecureSessionStore
 import com.example.ui.components.ArtifyTopHeader
+import com.example.ui.components.CameraXSelfieDialog
 import com.example.ui.components.ExportAttendancePdfDialog
+import com.example.ui.components.ThemeSettingsDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.RealSupervisorUiState
 import com.example.ui.viewmodel.RealSupervisorViewModel
-import kotlinx.coroutines.launch
 
-private enum class SupTab { HOME, ROSTER, LEAVE, SITES, SHIFT }
+private enum class SupTab { HOME, ROSTER, LEAVE, SITES, PROFILE }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +66,7 @@ fun RealSupervisorDashboardScreen(
     var showAssignShiftDialog by remember { mutableStateOf(false) }
     var assignShiftWorker by remember { mutableStateOf<AttendanceShiftDto?>(null) }
     var showExportPdfDialog by remember { mutableStateOf(false) }
+    var showProfileCameraDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val supervisorPrefs = remember(supervisorCode) {
@@ -196,11 +200,11 @@ fun RealSupervisorDashboardScreen(
                     colors = navColors()
                 )
                 NavigationBarItem(
-                    selected = tab == SupTab.SHIFT,
-                    onClick = { tab = SupTab.SHIFT },
-                    icon = { Icon(Icons.Default.Fingerprint, contentDescription = "Shift") },
-                    label = { Text("Shift") },
-                    modifier = Modifier.testTag("nav_shift"),
+                    selected = tab == SupTab.PROFILE,
+                    onClick = { tab = SupTab.PROFILE },
+                    icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
+                    label = { Text("Profile") },
+                    modifier = Modifier.testTag("nav_profile"),
                     colors = navColors()
                 )
             }
@@ -221,7 +225,10 @@ fun RealSupervisorDashboardScreen(
                     when (tab) {
                         SupTab.HOME -> HomeTab(
                             uiState = uiState,
-                            onOpenPendingApprovals = { showPendingApprovalsScreen = true }
+                            onOpenPendingApprovals = { showPendingApprovalsScreen = true },
+                            onRequestClockIn = { viewModel.setStartShiftDialog(true) },
+                            onRequestClockOut = { viewModel.setEndShiftDialog(true) },
+                            onRequestProxyCamera = { worker -> viewModel.setProxyCameraTarget(worker) }
                         )
                         SupTab.ROSTER -> RosterTab(
                             uiState = uiState,
@@ -237,12 +244,12 @@ fun RealSupervisorDashboardScreen(
                             onReject = { rejectDialogFor = it to false }
                         )
                         SupTab.SITES -> SitesTab(uiState.sites)
-                        SupTab.SHIFT -> ShiftTab(
+                        SupTab.PROFILE -> ProfileTab(
                             uiState = uiState,
-                            onClockInSelf = { lat, lon -> viewModel.clockInSelf(lat, lon) },
-                            onClockOutSelf = { lat, lon -> viewModel.clockOutSelf(lat, lon) },
-                            onProxyClockIn = { id, lat, lon -> viewModel.proxyClockIn(id, lat, lon) },
-                            onProxyClockOut = { id, lat, lon -> viewModel.proxyClockOut(id, lat, lon) }
+                            fallbackName = supervisorName,
+                            fallbackCode = supervisorCode,
+                            onUpdatePhotoClick = { showProfileCameraDialog = true },
+                            onLogout = onLogout
                         )
                     }
                 }
@@ -323,6 +330,47 @@ fun RealSupervisorDashboardScreen(
             onDismiss = {
                 supervisorPrefs.edit().putBoolean(onboardingKey, true).apply()
                 showOnboardingDialog = false
+            }
+        )
+    }
+
+    val supervisorProjectName = uiState.profile?.projectName ?: uiState.myShift?.project?.name ?: "Assigned Site"
+
+    if (uiState.showStartShiftDialog) {
+        CameraXSelfieDialog(
+            eventType = ShiftEventType.START_SHIFT, projectName = supervisorProjectName, employeeName = supervisorName,
+            onDismiss = { viewModel.setStartShiftDialog(false) },
+            onCaptureComplete = { path -> viewModel.clockInSelf(path) }
+        )
+    }
+    if (uiState.showEndShiftDialog) {
+        CameraXSelfieDialog(
+            eventType = ShiftEventType.END_SHIFT, projectName = supervisorProjectName, employeeName = supervisorName,
+            onDismiss = { viewModel.setEndShiftDialog(false) },
+            onCaptureComplete = { path -> viewModel.clockOutSelf(path) }
+        )
+    }
+    uiState.proxyCameraTarget?.let { target ->
+        CameraXSelfieDialog(
+            eventType = if (target.openShiftId != null) ShiftEventType.END_SHIFT else ShiftEventType.START_SHIFT,
+            projectName = supervisorProjectName,
+            employeeName = target.fullName,
+            onDismiss = { viewModel.setProxyCameraTarget(null) },
+            onCaptureComplete = { path ->
+                if (target.openShiftId != null) viewModel.proxyClockOut(target.id, path)
+                else viewModel.proxyClockIn(target.id, path)
+            }
+        )
+    }
+    if (showProfileCameraDialog) {
+        CameraXSelfieDialog(
+            eventType = ShiftEventType.START_SHIFT,
+            projectName = supervisorProjectName,
+            employeeName = supervisorName,
+            onDismiss = { showProfileCameraDialog = false },
+            onCaptureComplete = { path ->
+                showProfileCameraDialog = false
+                viewModel.updateProfilePhoto(path)
             }
         )
     }
@@ -634,17 +682,25 @@ private fun ApproveCommentPrompt(onDismiss: () -> Unit, onConfirm: (String) -> U
 @Composable
 private fun HomeTab(
     uiState: RealSupervisorUiState,
-    onOpenPendingApprovals: (() -> Unit)? = null
+    onOpenPendingApprovals: (() -> Unit)? = null,
+    onRequestClockIn: () -> Unit = {},
+    onRequestClockOut: () -> Unit = {},
+    onRequestProxyCamera: (NoMobileWorkerDto) -> Unit = {}
 ) {
     val isDark = LocalIsDarkTheme.current
+    val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
+    val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+    val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
+
+    val myShiftOpen = uiState.myShift?.status == "OPEN"
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Bottom
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         if (onOpenPendingApprovals != null) {
             Surface(
@@ -707,6 +763,103 @@ private fun HomeTab(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // My Attendance card -- supervisor's own clock-in/out, with selfie capture
+        // (CameraXSelfieDialog, wired at the screen level). Auto-approved server-side.
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Person, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("My Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (myShiftOpen) "Clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}" else "Not currently clocked in.",
+                    fontSize = 12.sp, color = textSecondary
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { if (myShiftOpen) onRequestClockOut() else onRequestClockIn() },
+                    enabled = !uiState.isProcessing,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (myShiftOpen) SophisticatedError else SophisticatedPrimary,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (myShiftOpen) "Clock Out with Selfie" else "Clock In with Selfie", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Workers Without Mobile section -- proxy attendance, also selfie-verified.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Groups, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Workers Without a Mobile Device (${uiState.noMobileWorkers.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
+        }
+        Text(
+            "Team members who have never registered a device -- record their attendance here on their behalf.",
+            fontSize = 11.sp, color = textSecondary
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (uiState.noMobileWorkers.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                Text("Every team member has a registered mobile device.", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                uiState.noMobileWorkers.forEach { worker ->
+                    val isOpen = worker.openShiftId != null
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        border = BorderStroke(1.dp, cardBorder)
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(worker.fullName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
+                                Text("${worker.employeeCode} · ${worker.role}", fontSize = 11.sp, color = textMuted)
+                                Text(
+                                    text = if (isOpen) "On shift since ${formatShiftTime(worker.clockInTime) ?: "—"}" else "Not clocked in today",
+                                    fontSize = 11.sp,
+                                    color = if (isOpen) SophisticatedSuccess else textSecondary
+                                )
+                            }
+                            Button(
+                                onClick = { onRequestProxyCamera(worker) },
+                                enabled = !uiState.isProcessing,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isOpen) SophisticatedError else SophisticatedPrimary,
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text(if (isOpen) "Clock Out" else "Clock In", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -1540,139 +1693,460 @@ private fun AttendanceRosterCard(
     }
 }
 
+// ---------------- Profile tab ----------------
+// Modeled directly on the Worker dashboard's own ProfileTab (RealWorkerDashboardScreen.kt)
+// so a supervisor's profile screen looks and behaves the same way.
+
 @Composable
-private fun ShiftTab(
+private fun ProfileTab(
     uiState: RealSupervisorUiState,
-    onClockInSelf: (Double?, Double?) -> Unit,
-    onClockOutSelf: (Double?, Double?) -> Unit,
-    onProxyClockIn: (String, Double?, Double?) -> Unit,
-    onProxyClockOut: (String, Double?, Double?) -> Unit
+    fallbackName: String,
+    fallbackCode: String,
+    onUpdatePhotoClick: () -> Unit = {},
+    onLogout: () -> Unit
 ) {
+    val profile = uiState.profile
+    val context = LocalContext.current
+    val themePreferences = remember { ThemePreferences.getInstance(context) }
+    val themeSettings by themePreferences.settings.collectAsState()
+    val isSystemDark = LocalIsDarkTheme.current
+    var showThemeDialog by remember { mutableStateOf(false) }
+    val deviceId = remember { SecureSessionStore.getInstance(context).deviceId }
+
     val isDark = LocalIsDarkTheme.current
     val cardBg = if (isDark) SophisticatedDarkSurface else SophisticatedLightSurface
     val cardBorder = if (isDark) SophisticatedDarkBorder else SophisticatedLightBorder
     val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
     val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
-    val textMuted = if (isDark) SophisticatedTextMuted else SophisticatedLightTextMuted
-
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val locationHelper = remember { LocationHelper(context) }
-
-    val myShiftOpen = uiState.myShift?.status == "OPEN"
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Shift Attendance", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = textPrimary)
-        Text(
-            "Record your own attendance, and clock in/out workers who have no mobile device of their own.",
-            fontSize = 11.sp, color = textSecondary
-        )
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // My Attendance card
+        // --- Profile Header Card ---
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_header_card"),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = cardBg),
             border = BorderStroke(1.dp, cardBorder)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Person, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("My Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = if (myShiftOpen) "Clocked in since ${formatShiftTime(uiState.myShift?.clockIn?.serverTimestamp) ?: "—"}" else "Not currently clocked in.",
-                    fontSize = 12.sp, color = textSecondary
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            val loc = locationHelper.getCurrentLocation()
-                            if (myShiftOpen) onClockOutSelf(loc?.latitude, loc?.longitude)
-                            else onClockInSelf(loc?.latitude, loc?.longitude)
-                        }
-                    },
-                    enabled = !uiState.isProcessing,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (myShiftOpen) SophisticatedError else SophisticatedPrimary,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (myShiftOpen) "Clock Out" else "Clock In", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // Workers Without Mobile section
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Groups, contentDescription = null, tint = SophisticatedPrimary, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Workers Without a Mobile Device (${uiState.noMobileWorkers.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textPrimary)
-        }
-        Text(
-            "Team members who have never registered a device -- record their attendance here on their behalf.",
-            fontSize = 11.sp, color = textSecondary
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (uiState.noMobileWorkers.isEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                Text("Every team member has a registered mobile device.", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
-            }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                uiState.noMobileWorkers.forEach { worker ->
-                    val isOpen = worker.openShiftId != null
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = cardBg),
-                        border = BorderStroke(1.dp, cardBorder)
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(worker.fullName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textPrimary)
-                                Text("${worker.employeeCode} · ${worker.role}", fontSize = 11.sp, color = textMuted)
-                                Text(
-                                    text = if (isOpen) "On shift since ${formatShiftTime(worker.clockInTime) ?: "—"}" else "Not clocked in today",
-                                    fontSize = 11.sp,
-                                    color = if (isOpen) SophisticatedSuccess else textSecondary
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Large Avatar with Initials & Camera Badge
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(90.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(SophisticatedPrimary, SophisticatedTertiary)
                                 )
-                            }
-                            Button(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        val loc = locationHelper.getCurrentLocation()
-                                        if (isOpen) onProxyClockOut(worker.id, loc?.latitude, loc?.longitude)
-                                        else onProxyClockIn(worker.id, loc?.latitude, loc?.longitude)
-                                    }
-                                },
-                                enabled = !uiState.isProcessing,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isOpen) SophisticatedError else SophisticatedPrimary,
-                                    contentColor = Color.White
-                                ),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            )
+                            .border(2.5.dp, SophisticatedPrimary.copy(alpha = 0.8f), CircleShape)
+                            .clickable { onUpdatePhotoClick() }
+                            .testTag("user_avatar_image")
+                    ) {
+                        if (uiState.localAvatarPath != null) {
+                            AsyncImage(
+                                model = java.io.File(uiState.localAvatarPath),
+                                contentDescription = "Profile Photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            val initials = (profile?.fullName ?: fallbackName)
+                                .split(" ")
+                                .mapNotNull { it.firstOrNull()?.toString() }
+                                .take(2)
+                                .joinToString("")
+                                .ifEmpty { "SV" }
+                            Text(
+                                text = initials,
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 28.sp,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                    }
+
+                    // Camera Edit FAB Badge
+                    Surface(
+                        shape = CircleShape,
+                        color = SophisticatedPrimary,
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(2.dp, cardBg),
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clickable { onUpdatePhotoClick() }
+                            .testTag("change_profile_photo_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Update Profile Photo",
+                                tint = SophisticatedOnPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Full Name
+                Text(
+                    text = profile?.fullName ?: fallbackName,
+                    color = textPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Role Pill Badge
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (isDark) SophisticatedPrimaryContainer else SophisticatedLightPrimaryContainer,
+                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(SophisticatedPrimary)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${profile?.role ?: "SUPERVISOR"} • ${profile?.department ?: "—"}",
+                            color = SophisticatedPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "ID: ${profile?.employeeCode ?: fallbackCode} • ${profile?.companyName ?: "—"}",
+                    color = textSecondary,
+                    fontSize = 12.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Update Profile Photo Button (Camera)
+                OutlinedButton(
+                    onClick = onUpdatePhotoClick,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = SophisticatedPrimary.copy(alpha = 0.08f),
+                        contentColor = SophisticatedPrimary
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("update_profile_pic_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Update Profile Photo (Camera)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- Display & Environment Theme Settings Card ---
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("theme_settings_card"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder)
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DISPLAY & ENVIRONMENT THEME",
+                        color = SophisticatedPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (isDark) SophisticatedPrimaryContainer else SophisticatedLightPrimaryContainer
+                    ) {
+                        Text(
+                            text = if (isSystemDark) "DARK MODE" else "LIGHT MODE",
+                            color = SophisticatedPrimary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "High-contrast dynamic themes designed for bright daylight and night construction visibility.",
+                    color = textSecondary,
+                    fontSize = 12.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 3-Way Mode Segmented Selector (System, Light, Dark)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isDark) SophisticatedDarkSurfaceHigh else SophisticatedLightSurfaceHigh)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ThemeMode.values().forEach { mode ->
+                        val isSelected = themeSettings.themeMode == mode
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { themePreferences.setThemeMode(mode) }
+                                .testTag("theme_mode_chip_${mode.name.lowercase()}"),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) SophisticatedPrimary else Color.Transparent,
+                            tonalElevation = if (isSelected) 2.dp else 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(if (isOpen) "Clock Out" else "Clock In", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = when (mode) {
+                                        ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                                        ThemeMode.LIGHT -> Icons.Default.LightMode
+                                        ThemeMode.DARK -> Icons.Default.DarkMode
+                                    },
+                                    contentDescription = null,
+                                    tint = if (isSelected) SophisticatedOnPrimary else textSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = mode.shortName,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) SophisticatedOnPrimary else textSecondary
+                                )
                             }
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Persistent Dark Mode Switch Row
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) SophisticatedDarkSurfaceHigh.copy(alpha = 0.5f) else SophisticatedLightSurfaceHigh.copy(alpha = 0.5f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (isSystemDark) Icons.Default.DarkMode else Icons.Default.LightMode,
+                                contentDescription = null,
+                                tint = SophisticatedPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Dark Theme",
+                                    color = textPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = when (themeSettings.themeMode) {
+                                        ThemeMode.DARK -> "Always Dark (Battery & Night Shift)"
+                                        ThemeMode.LIGHT -> "Always Light (High Daylight Visibility)"
+                                        ThemeMode.SYSTEM -> "Following System Mode"
+                                    },
+                                    color = textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isSystemDark,
+                            onCheckedChange = { checked ->
+                                themePreferences.setThemeMode(if (checked) ThemeMode.DARK else ThemeMode.LIGHT)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = SophisticatedPrimary,
+                                checkedTrackColor = SophisticatedPrimaryContainer,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.testTag("dark_mode_toggle_switch")
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Button to open Full Theme & Dynamic Color Settings
+                OutlinedButton(
+                    onClick = { showThemeDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("customize_theme_btn"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = SophisticatedPrimary
+                    ),
+                    border = BorderStroke(1.dp, SophisticatedPrimary.copy(alpha = 0.5f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Palette,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Configure Dynamic Colors & System Themes",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- Contact & Credentials ---
+        ProfileSectionLabel("CONTACT & CREDENTIALS")
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                ProfileDetailRow("Email", profile?.email ?: "—")
+                ProfileDetailRow("Phone", profile?.phone ?: "—")
+                ProfileDetailRow("Department", profile?.department ?: "—")
+                ProfileDetailRow("Assigned Site", profile?.projectName ?: "—")
+                ProfileDetailRow("Account Status", if (profile != null) "Active" else "—")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        ProfileSectionLabel("SECURITY & DEVICE")
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                ProfileDetailRow("Device ID", deviceId.take(18) + "…")
+                ProfileDetailRow("Facial Biometrics", "Enrolled & Active")
+                ProfileDetailRow("Time Authority", "Authoritative server clock (UTC)")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        OutlinedButton(
+            onClick = onLogout,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, SophisticatedError.copy(alpha = 0.5f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = if (isDark) SophisticatedErrorContainer.copy(alpha = 0.2f) else SophisticatedLightErrorContainer.copy(alpha = 0.2f),
+                contentColor = SophisticatedError
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Sign Out", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        Spacer(modifier = Modifier.height(16.dp))
     }
+
+    if (showThemeDialog) {
+        ThemeSettingsDialog(themePreferences = themePreferences, onDismiss = { showThemeDialog = false })
+    }
+}
+
+@Composable
+private fun ProfileDetailRow(label: String, value: String) {
+    val isDark = LocalIsDarkTheme.current
+    val textPrimary = if (isDark) SophisticatedTextPrimary else SophisticatedLightTextPrimary
+    val textSecondary = if (isDark) SophisticatedTextSecondary else SophisticatedLightTextSecondary
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 12.sp, color = textSecondary)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = textPrimary)
+    }
+}
+
+@Composable
+private fun ProfileSectionLabel(text: String, modifier: Modifier = Modifier.fillMaxWidth()) {
+    Text(
+        text, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
+        color = SophisticatedPrimary, modifier = modifier.padding(bottom = 6.dp)
+    )
 }
 
 @Composable

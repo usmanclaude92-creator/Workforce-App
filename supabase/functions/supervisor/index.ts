@@ -17,6 +17,40 @@ function selfiePublicUrl(path: string | null): string | null {
   return `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/attendance-selfies/${clean}`;
 }
 
+// Uploads a raw base64 selfie captured on the supervisor's own device for a proxy
+// clock-in/out and returns its public URL -- mirrors the `attendance` function's
+// resolveSelfieUrl so a proxy-recorded punch carries the same evidence photo a
+// self-service mobile punch does.
+async function resolveSelfieUrl(supabase: any, reqBody: any, fileNameSeed: string): Promise<string | null> {
+  if (reqBody.selfie_url || reqBody.storage_url) {
+    return reqBody.selfie_url ?? reqBody.storage_url;
+  }
+  const rawBase64 = reqBody.selfie_base64 ?? reqBody.selfieBase64 ?? reqBody.selfie;
+  if (rawBase64 && typeof rawBase64 === "string" && rawBase64.length > 50) {
+    try {
+      const cleanBase64 = rawBase64.replace(/^data:image\/\w+;base64,/, "").replace(/[\r\n\s]/g, "");
+      const binaryString = atob(cleanBase64);
+      const bytes = Uint8Array.from(binaryString, (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "image/jpeg" });
+
+      const fileName = `selfie_${fileNameSeed}_${Date.now()}.jpg`;
+      const { error: uploadErr } = await supabase
+        .storage
+        .from("attendance-selfies")
+        .upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
+
+      if (!uploadErr) {
+        const { data: urlData } = supabase
+          .storage
+          .from("attendance-selfies")
+          .getPublicUrl(fileName);
+        return urlData.publicUrl;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 function mapApprovalStatus(shift: any): string {
   if (shift.approval_status === "APPROVED") return "APPROVED";
   if (shift.approval_status === "REJECTED") return "REJECTED";
@@ -614,6 +648,8 @@ serve(async (req: Request) => {
         };
       }
 
+      const proxyInSelfieUrl = await resolveSelfieUrl(supabase, body, `${targetId}_in`);
+
       const shiftId = crypto.randomUUID();
       const clockInId = crypto.randomUUID();
       const { data: newShift, error: insertErr } = await supabase
@@ -632,6 +668,7 @@ serve(async (req: Request) => {
           latitude: deviceLat,
           longitude: deviceLon,
           recorded_by: supervisor.id,
+          selfie_url: proxyInSelfieUrl,
           ...scheduledFields,
         })
         .select()
@@ -706,6 +743,8 @@ serve(async (req: Request) => {
         earlyDepartureMinutes = Math.max(0, rawEarly - (openShift.scheduled_grace_out_minutes ?? 0));
       }
 
+      const proxyOutSelfieUrl = await resolveSelfieUrl(supabase, body, `${targetId}_out`);
+
       const { data: updated, error: updateErr } = await supabase
         .from("attendance_shifts")
         .update({
@@ -716,6 +755,7 @@ serve(async (req: Request) => {
           geofence_status: geofence.status,
           distance_from_project_meters: geofence.distance,
           early_departure_minutes: earlyDepartureMinutes,
+          end_selfie_url: proxyOutSelfieUrl,
           approval_status: "APPROVED",
           reviewed_by: supervisor.id,
           reviewed_at: nowIso,

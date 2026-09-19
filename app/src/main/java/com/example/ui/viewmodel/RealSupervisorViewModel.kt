@@ -5,11 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.BackendResult
 import com.example.data.repository.IWorkforceRepository
+import com.example.location.LocationHelper
 import com.example.network.ArtifyBackendConfig
 import com.example.network.AttendanceApprovalDto
 import com.example.network.AttendanceShiftDto
 import com.example.network.LeaveRequestDto
 import com.example.network.NoMobileWorkerDto
+import com.example.network.ProfileDto
 import com.example.network.SiteDto
 import com.example.network.SupervisorMetricsDto
 import com.example.notifications.FcmNotificationManager
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.util.UUID
 
@@ -31,6 +34,15 @@ data class RealSupervisorUiState(
     // dashboard uses), and the team members who have no mobile device of their own.
     val myShift: AttendanceShiftDto? = null,
     val noMobileWorkers: List<NoMobileWorkerDto> = emptyList(),
+    val profile: ProfileDto? = null,
+    val localAvatarPath: String? = null,
+    // Camera dialog state for attendance punching -- mirrors the Worker dashboard's own
+    // showStartShiftDialog/showEndShiftDialog so the supervisor's self clock-in/out on
+    // the Home tab uses the exact same CameraXSelfieDialog flow. proxyCameraTarget holds
+    // the no-mobile worker currently being clocked in/out on their behalf (null = none).
+    val showStartShiftDialog: Boolean = false,
+    val showEndShiftDialog: Boolean = false,
+    val proxyCameraTarget: NoMobileWorkerDto? = null,
     val isLoading: Boolean = true,
     val isProcessing: Boolean = false,
     val statusMessage: String? = null,
@@ -38,7 +50,10 @@ data class RealSupervisorUiState(
     val selfieUrlCache: Map<String, String> = emptyMap()
 )
 
-class RealSupervisorViewModel(private val repository: IWorkforceRepository) : ViewModel() {
+class RealSupervisorViewModel(
+    private val repository: IWorkforceRepository,
+    private val locationHelper: LocationHelper
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RealSupervisorUiState())
     val uiState: StateFlow<RealSupervisorUiState> = _uiState.asStateFlow()
@@ -82,25 +97,47 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
                 is BackendResult.Success -> _uiState.value = _uiState.value.copy(noMobileWorkers = result.value)
                 is BackendResult.Failure -> {}
             }
+            when (val result = repository.myProfile()) {
+                is BackendResult.Success -> _uiState.value = _uiState.value.copy(profile = result.value)
+                is BackendResult.Failure -> {}
+            }
             _uiState.value = _uiState.value.copy(isLoading = false)
         }
     }
 
     fun clearFeedback() { _uiState.value = _uiState.value.copy(statusMessage = null, errorMessage = null) }
 
+    fun setStartShiftDialog(show: Boolean) { _uiState.value = _uiState.value.copy(showStartShiftDialog = show) }
+    fun setEndShiftDialog(show: Boolean) { _uiState.value = _uiState.value.copy(showEndShiftDialog = show) }
+    fun setProxyCameraTarget(worker: NoMobileWorkerDto?) { _uiState.value = _uiState.value.copy(proxyCameraTarget = worker) }
+
+    fun updateProfilePhoto(filePath: String) {
+        _uiState.value = _uiState.value.copy(
+            localAvatarPath = filePath,
+            statusMessage = "Profile photo updated successfully"
+        )
+    }
+
     // -------------------- Supervisor's own attendance --------------------
     // Reuses the same `attendance` clock_in/clock_out actions the Worker dashboard uses --
-    // a supervisor is also just an employee with their own device session.
+    // a supervisor is also just an employee with their own device session. The selfie is
+    // captured via the same CameraXSelfieDialog the Worker app uses (see
+    // RealSupervisorDashboardScreen), and location is fetched here, right before the
+    // punch, exactly as RealWorkerViewModel.startShift/endShift already do.
 
-    fun clockInSelf(latitude: Double?, longitude: Double?) {
+    fun clockInSelf(selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showStartShiftDialog = false)
+            val location = locationHelper.getCurrentLocation()
+            val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
             val result = repository.clockIn(
                 clientEventId = UUID.randomUUID().toString(),
                 deviceTimestamp = Instant.now().toString(),
-                latitude = latitude, longitude = longitude,
-                accuracy = null, isMockLocation = false, selfieBase64 = null
+                latitude = location?.latitude, longitude = location?.longitude,
+                accuracy = location?.accuracy, isMockLocation = location?.isMock ?: false, selfieBase64 = selfieBase64
             )
+            runCatching { File(selfieFilePath).delete() }
             when (result) {
                 is BackendResult.Success -> {
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clocked in.", myShift = result.value.shift)
@@ -110,15 +147,19 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
         }
     }
 
-    fun clockOutSelf(latitude: Double?, longitude: Double?) {
+    fun clockOutSelf(selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, showEndShiftDialog = false)
+            val location = locationHelper.getCurrentLocation()
+            val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
             val result = repository.clockOut(
                 clientEventId = UUID.randomUUID().toString(),
                 deviceTimestamp = Instant.now().toString(),
-                latitude = latitude, longitude = longitude,
-                accuracy = null, isMockLocation = false, selfieBase64 = null
+                latitude = location?.latitude, longitude = location?.longitude,
+                accuracy = location?.accuracy, isMockLocation = location?.isMock ?: false, selfieBase64 = selfieBase64
             )
+            runCatching { File(selfieFilePath).delete() }
             when (result) {
                 is BackendResult.Success -> {
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clocked out.", myShift = result.value.shift)
@@ -129,11 +170,19 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
     }
 
     // -------------------- Proxy attendance for workers without a mobile --------------------
+    // Same selfie-capture flow as above, on behalf of a team member with no device of
+    // their own -- the resulting evidence photo is uploaded server-side exactly like a
+    // self-service punch's.
 
-    fun proxyClockIn(employeeId: String, latitude: Double?, longitude: Double?) {
+    fun proxyClockIn(employeeId: String, selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
-            when (val result = repository.proxyClockIn(employeeId, latitude, longitude)) {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, proxyCameraTarget = null)
+            val location = locationHelper.getCurrentLocation()
+            val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
+            val result = repository.proxyClockIn(employeeId, location?.latitude, location?.longitude, selfieBase64)
+            runCatching { File(selfieFilePath).delete() }
+            when (result) {
                 is BackendResult.Success -> {
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-in recorded.")
                     refresh()
@@ -143,10 +192,15 @@ class RealSupervisorViewModel(private val repository: IWorkforceRepository) : Vi
         }
     }
 
-    fun proxyClockOut(employeeId: String, latitude: Double?, longitude: Double?) {
+    fun proxyClockOut(employeeId: String, selfieFilePath: String) {
+        if (_uiState.value.isProcessing) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null)
-            when (val result = repository.proxyClockOut(employeeId, latitude, longitude)) {
+            _uiState.value = _uiState.value.copy(isProcessing = true, errorMessage = null, proxyCameraTarget = null)
+            val location = locationHelper.getCurrentLocation()
+            val selfieBase64 = com.example.util.ImageCompressionUtils.compressAndEncodeSelfie(selfieFilePath)
+            val result = repository.proxyClockOut(employeeId, location?.latitude, location?.longitude, selfieBase64)
+            runCatching { File(selfieFilePath).delete() }
+            when (result) {
                 is BackendResult.Success -> {
                     _uiState.value = _uiState.value.copy(isProcessing = false, statusMessage = "Clock-out recorded.")
                     refresh()

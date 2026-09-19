@@ -347,7 +347,8 @@ data class ProxyAttendanceRequest(
     val action: String,
     @Json(name = "employee_id") val employeeId: String,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    @Json(name = "selfie_base64") val selfieBase64: String? = null
 )
 
 @JsonClass(generateAdapter = true)
